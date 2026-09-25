@@ -1,8 +1,9 @@
 # ASF02 Feeder — Home Assistant Integration Design
 
 Status: **design spec** (not yet implemented)
-Date: 2026-09-11
-Library: [`asf02`](../asf02) v0.1.x (this repo's sibling)
+Date: 2026-09-11; revised 2026-09-18 (aligned with published `asf02` 0.1.0 API and
+`INTEGRATION_GUIDE.md`)
+Library: [`asf02`](https://pypi.org/project/asf02/) v0.1.x (sibling repo, on PyPI)
 HA target: current core (dev-branch APIs verified 2026-09-11; see §13 Sources)
 
 ---
@@ -89,10 +90,50 @@ async with ASF02Client(address, token, client_factory=lambda addr: ble_device) a
 object that participates in HA's slot manager. No HA imports leak into the
 library; a non-HA caller gets the exact same code path as today.
 
+> **Status (verified 2026-09-18 against published `asf02` 0.1.0):** the
+> shipped constructor is `ASF02Client(address, token, *, response_timeout,
+> post_connect_delay)` and `connect()` builds `BleakClient(self.address,
+> timeout=20)` internally — so this seam does **not exist yet** and is a
+> prerequisite for any integration work (plan item 1).
+
 > Note: older guides (e.g. ha-petkit-ble's `BluetoothClient` helper)
 > predate the current API. The verified current path is
 > `async_ble_device_from_address` + injecting the returned device as the
 > client. `bluetooth.async_connect` does not exist in current core.
+
+### 3.2 Hardware findings, 2026-09-18 (dedicated probes, fw 1.19.12)
+
+Two dedicated probe sessions on the spare unit (adapter power, then
+freshly-charged NiMH AAs; script `tmp/ble_drain.py`, data in
+`tmp/drain_20260918_164735.csv`). These supersede earlier assumptions
+where they conflict:
+
+- **Mid-feed link drops: not reproducible.** ~60 portions total across
+  both sessions (feed(1)/2/3/50) with 91 mid-feed status polls:
+  **zero link drops, zero poll failures**, on both power sources. ACKs
+  arrive in 86–100 ms and the link stays up the entire dispense. The
+  "device drops the GATT connection during a feed" observation from
+  earlier sessions did not reproduce; treat it as rare/unknown-condition
+  and keep the fallback path (§7.4) rather than designing around it.
+- **Mid-feed status polling is reliable**: responses ~90–127 ms (no
+  measurable slowdown vs idle), `s=1` stable throughout the dispense.
+- **`n` increments live during dispense**: ~1 per portion, ~5.1 s apart
+  (feed(50): 1243→1293 while `s=1`), total delta exactly equals the
+  requested portions. The "counter updates only after the dispense"
+  assumption is wrong.
+- **`stop()` cancels before any portion counts**: `feed(3)` + stop at
+  2 s → `n`/`t` delta 0. (Verified on both power sources.)
+- **Battery `b` on fresh NiMH (100%)**: 522–524 at rest. A feed(50)
+  dropped it to 515 (−7 over ~250 s of motor time), front-loaded sag
+  (~−4 in the first 30 s) then flat, recovering to 518 after 15 s rest.
+  Compare adapter power (earlier 100-portion study: 428–461 range, −39
+  drop). The value is clearly power-source-dependent and **not a simple
+  mV/cell reading** — reinforces "expose raw + `≤410` low threshold, no
+  percentage gauge in v1."
+- **Implications adopted in this spec**: §7.4 `asf02_feed` now polls
+  `s` until 0 in-session (no blind wait+reconnect); §6.2/§7.1 counter is
+  live progress; `binary_sensor.feeding` can be driven by mid-feed polls
+  (service-triggered refresh), not just the 15-min cadence.
 
 ## 4. Manifest
 
@@ -100,10 +141,11 @@ library; a non-HA caller gets the exact same code path as today.
 {
   "domain": "asf02",
   "name": "ASF02 Pet Feeder",
-  "codeowners": ["@<user>"],
+  "version": "0.1.0",
+  "codeowners": ["@cptskippy", "@AgentCarlBrutananadilewski"],
   "config_flow": true,
   "dependencies": ["bluetooth_adapters"],
-  "integration_type": "hub",
+  "integration_type": "device",
   "iot_class": "local_polling",
   "bluetooth": [
     {
@@ -116,6 +158,13 @@ library; a non-HA caller gets the exact same code path as today.
 ```
 
 Key points:
+- `version` — **required for custom integrations** (HACS + UI display); keep in
+  lockstep with the repo tag.
+- `integration_type: "device"` — per the current docs, `device` = one config
+  entry per physical device; `hub` = one entry governing many (Hue-style).
+  Each feeder is its own config entry, so `device` is the honest value.
+  (Original draft said `hub`; corrected 2026-09-18 after re-reading the
+  manifest docs.)
 - `dependencies: ["bluetooth_adapters"]` — ensures all remote adapters
   (ESPHome proxies) are connected before our entry sets up (HA dev docs,
   verified).
@@ -172,7 +221,7 @@ Config entry data (persisted):
 |-----|------|-------|
 | `address` | str | MAC `AA:BB:CC:DD:EE:FF` (canonical form we store) |
 | `token` | str | 10-char pairing token (device-side secret; entry data is encrypted at rest by HA) |
-| `tz_offset_minutes` | int | e.g. -420; used for `time.calibration` each session |
+| `tz_offset_seconds` | int | e.g. -25200 (PDT); used for `time.calibration` each session. Wire protocol uses total seconds, not minutes — verified against app source. |
 | `name` | str | friendly name (title) |
 
 Options flow (later, v1.1): poll interval, timezone, per-device override of
@@ -222,8 +271,10 @@ class FeederSnapshot:
     hw_version: str        # info.h
     serial: str            # info.s
     state: int             # status.s (0=idle, 1=feeding — live-verified)
-    feed_count: int        # status.n (portion counter, +portions per feed command)
-    feed_count_mirror: int # status.t (tracks n exactly; exact role still unclear)
+    feed_count: int        # status.n (portions dispensed). Increments LIVE, ~1/portion as each
+                           # dispenses (verified 2026-09-18: feed(50) climbed 1243→1293 during s=1),
+                           # NOT just on the post-dispense re-read. Total delta == requested portions.
+    feed_count_mirror: int # status.t (separate counter, survives power cycle — does NOT track n. Verified: power cycle resets u but not n or t)
     battery_raw: int       # status.b (unit unconfirmed; 410 = low threshold per vendor app)
     uptime_raw: int        # status.u
     schedule: tuple[PlanEntry, ...]
@@ -256,7 +307,7 @@ data source.
 | Entity | Type | Source | Notes |
 |--------|------|--------|-------|
 | `sensor.<dev>_battery` | `SensorDeviceClass.BATTERY` | `battery_raw` → native | raw value + **`battery_low` binary sensor** from the vendor threshold: `b ≤ 410` = low (app source-verified 2026-09-12). Raw unit still unconfirmed (NiMH fresh ≈522, adapter ≈428–461) — expose raw as-is; a 0–100% gauge can come later calibrated against the 410 threshold |
-| `sensor.<dev>_feed_count` | `SensorDeviceClass.TOTAL_INCREASING` | `feed_count` | `state_class: TOTAL_INCREASING`. Counts **portions** — a `feed(10)` adds 10 once the async dispense completes (live-verified across three deltas). Update arrives on the post-feed re-read, not instantly. |
+| `sensor.<dev>_feed_count` | `SensorDeviceClass.TOTAL_INCREASING` | `feed_count` | `state_class: TOTAL_INCREASING`. Counts **portions**; increments **live, ~1 per portion, while the motor runs** (verified 2026-09-18 on feed(50): climbed steadily during `s=1`). Earlier note "update arrives on the post-feed re-read" is superseded — polling during a feed sees progress. |
 | `sensor.<dev>_schedule` | `SensorDeviceClass.TIMESTAMP`? **No** — text | schedule | `native_value`: human string `"15:30 ×1 · 16:00 ×1"` (or `—`); **attributes**: `slots_0..9` = `"15:30|1|on"` per slot + `entry_count`. Automations can read attributes for machine use |
 | `sensor.<dev>_device_time` | `SensorDeviceClass.TIMESTAMP` | last `info`/unlock `t` + tz | shows what the *device* thinks the time is (drift diagnostic) |
 
@@ -284,9 +335,9 @@ relying on the binary sensor window.
 
 | Service | Fields | Behavior |
 |---------|--------|----------|
-| `asf02_feed` | `portions: int (1..99)` | session 1: unlock → `feed(n)` (ACK `true` ~90 ms) → **disconnect** (device will drop the link mid-feed anyway). Wait a dispense window (**~5.1 s/portion** + margin; a `feed(10)` ran ~51 s, observed 10×), then **reconnect** (new session: unlock again) → read status → refresh coordinator → return `{"fed": true, "portions": n, "feed_count": N}`. Errors: `HomeAssistantError` with the ASF02 error text (locked/in-range/timeout). **Never poll status mid-feed — the device drops the GATT connection** (live-verified). |
-| `asf02_stop` | — | `stop()`; returns `{"ok": true}` |
-| `asf02_set_schedule` | `entries: list[{time: "HH:MM", weight: int(1..9), enabled: bool = true}]` max 10 | full-array replace (the only reliable write form, live-verified); uses the **write-response echo** as confirmation (read-back is unreliable on fw 1.19.12); refreshes coordinator; returns the stored slots |
+| `asf02_feed` | `portions: int (1..99)` | single session: unlock → `feed(n)` (ACK `true` ~90 ms) → **stay connected** and poll `status()` every ~3 s until `s==0` (mid-feed polling verified reliable 2026-09-18: 11/11 probes on feed(2), 80/80 on feed(50), zero link drops on adapter *and* fresh-battery power). This yields live progress via `feed_count` and an accurate completion signal (~5.1 s/portion; feed(50) ran 250 s). **Fallback**: if the link drops mid-feed (observed once in earlier sessions, never reproduced in the 2026-09-18 probes) → disconnect, wait remaining estimate (`n × 5.1 s + 10 s`, capped), reconnect+unlock, read status. Returns `{"fed": true, "portions": n, "feed_count": N}`. Errors: `HomeAssistantError` with the ASF02 error text (locked/in-range/timeout). |
+| `asf02_stop` | — | `stop()`; returns `{"ok": true}`. **Verified cancel semantics (2026-09-18):** called mid-feed it stops the dispense *before* any portion counts — `n`/`t` delta was 0 for a `feed(3)` stopped at ~2 s. Safe to expose as a "stop feeding" button; it cannot double-count. |
+| `asf02_set_schedule` | `entries: list[{time: "HH:MM", portion: int(1..9), enabled: bool = true}]` max 10 | full-array replace (the only reliable write form, live-verified); uses the **write-response echo** as confirmation (read-back is unreliable on fw 1.19.12); refreshes coordinator; returns the stored slots |
 | `asf02_clear_schedule` | — | `set_schedule([])` |
 
 Service schema: `vol.Schema({vol.Required("entity_id"): cv.entity_ids, ...})`
@@ -362,11 +413,11 @@ One `DeviceInfo` per feeder: `identifiers={(DOMAIN, address)}`,
 |---|----------|---------------------------------|
 | Q1 | `feeder.log` row shape (device silent on spare) | No log entity in v1; re-test on an in-use unit |
 | Q2 | `status.b` units (428–461 on adapter; ~522–526 on fresh NiMH AAs — not plain mV) | **Partially resolved 2026-09-12:** vendor app threshold = `b ≤ 410` ⇒ low battery (source-verified). Expose raw `battery_raw` + `battery_low` binary sensor; skip % gauge in v1. |
-| Q3 | Schedule *read* reliability on in-use firmware (spare: silent) | Write-echo is truth; reads best-effort |
+| Q3 | Schedule *read* reliability on in-use firmware (spare: silent) | **Resolved 2026-09-15:** writes DO persist and fire correctly. Verified by writing a 2-portion entry for 22:30, checking counters at 22:45: `n` and `t` both incremented exactly +2. Entry was consumed after firing (post-fire read showed empty schedule). **Device clock must be correct** — entries are naive local time matched against the device's internal clock. Stale clock = silent no-fire. Always `time.calibration` first. |
 | Q4 | `status.u` / `d` meaning | Expose `u` raw as attribute only |
-| Q5 | Idle-disconnect timeout of the feeder (does it drop us mid-session after N s?) | **Resolved 2026-09-12:** it drops the link *during* a feed (and we can't poll mid-feed); a `feed(10)` runs ~51 s. Outside feeds, sessions ≤15 s never hit a timeout. |
+| Q5 | Idle-disconnect timeout of the feeder (does it drop us mid-session after N s?) | **Re-opened 2026-09-18:** dedicated probes (feed 1/2/3/50, ~60 portions, 91 mid-feed polls, adapter + fresh-battery power) saw **zero** mid-feed link drops — the earlier "drops during a feed" observation did not reproduce. `s==1` and status polls work throughout. Kept a defensive fallback in §7.4 in case it's condition-dependent (see §3.2). |
 | Q6 | Vendor brand string for `DeviceInfo.manufacturer` | **Resolved** (2026-09-11): brand Lulumiao, manufacturer Hong Kong M Spacer Limited, model CWH01L-A1, FCC ID 2A9QN-CWH01L-A1 (user-provided label data; matches original FCC grant 2AKG5-ASF02, 2022) |
-| Q7 | Battery sag/drain **with food** (kibble) in the hopper | **TODO (needs Peter):** the 2026-09-12 drain study (−39 `b` over 100 portions, front-loaded) was on an **empty** feeder — a floor. Re-run with kibble to get the production-realistic motor load (expect deeper instantaneous sag + steeper drain). |
+| Q7 | Battery sag/drain **with food** (kibble) in the hopper | **TODO (needs hardware time):** both drain studies so far (2026-09-12: −39 `b` / 100 portions on adapter; 2026-09-18: −7 `b` / 50 portions on fresh NiMH) were on an **empty** feeder — floors, not production values. Re-run with kibble to get the realistic motor load (expect deeper instantaneous sag + steeper drain). |
 
 ## 12. Testing strategy
 
@@ -391,8 +442,12 @@ One `DeviceInfo` per feeder: `identifiers={(DOMAIN, address)}`,
 4. **Soak**: 4 feeders, 1 proxy, 15-min poll for 48 h; watch for slot
    exhaustion / BlueZ errors in HA logs.
 
-## 13. Sources (verified 2026-09-11)
+## 13. Sources (verified 2026-09-11; doc re-check 2026-09-18)
 
+- `INTEGRATION_GUIDE.md` (this directory, 2026-09-18) — current official
+  developer docs: manifest keys, config entries/flows, coordinators,
+  Bluetooth API rules, HACS publishing. Re-verified against
+  `home-assistant/developers.home-assistant` master.
 - HA core dev `homeassistant/components/bluetooth/api.py` — full current
   API surface (`async_ble_device_from_address`, `async_process_advertisements`,
   `async_track_unavailable`, `async_get_scanner`, …; **no** `async_connect`).
@@ -417,17 +472,35 @@ One `DeviceInfo` per feeder: `identifiers={(DOMAIN, address)}`,
 
 ## 14. Implementation plan (after spec approval)
 
-1. **Library v0.2**: `client_factory` injection seam (small, backwards
-   compatible) + release. (Also corrects the README battery-unit wording.)
-2. **Skeleton**: manifest, `__init__.py` (entry setup/unload, coordinator
-   wiring), device registry, no entities yet. Load in HA, confirm entry
-   setup with the spare.
-3. **Config flow**: discovery + manual + token + generate-token paths.
-4. **Sensors + binary sensor + event** (from `FeederSnapshot`).
+Status notes (2026-09-18): `asf02` 0.1.0 is **published on PyPI** and
+verified against the live spare feeder (connect → unlock → info → status,
+clean session). The `client_factory` seam (§3.1) is confirmed **not** in
+0.1.0 — it is the gating change.
+
+1. **Library v0.2**: `client_factory` injection seam (§3.1; small,
+   backwards compatible) + release to PyPI. (Also corrects the README
+   battery-unit wording.) *Everything below is blocked on this.*
+2. **Skeleton**: manifest (per §4, incl. `version`), `__init__.py`
+   (entry setup/unload, coordinator wiring), device registry, no entities
+   yet. Load in HA, confirm entry setup with the spare.
+3. **Config flow**: discovery + manual + token + generate-token paths
+   (follow the patterns in `INTEGRATION_GUIDE.md` §5).
+4. **Sensors + binary sensors + event** (from `FeederSnapshot`).
 5. **Services** (feed/stop/set/clear).
 6. **Test suite** (§12.2) to green, then **live acceptance** (§12.3).
 7. **Polish**: options flow, README (proxy requirements, token recovery),
-   HACS publish; PyPI publish of `asf02` when it's stable.
+   HACS publish (manifest `version` == repo tag; see
+   `INTEGRATION_GUIDE.md` §11).
 
-Each step is independently shippable; 1–2 are prerequisites for everything
+Each step is independently shippable; 1 is a prerequisite for everything
 else.
+
+## 15. Companion documents
+
+- `INTEGRATION_GUIDE.md` (this directory) — general HA integration
+  development guide from the current official docs, with a
+  best-practice → our-decision mapping table. Read that first, then this
+  spec; this spec is the *specifics*, the guide is the *vocabulary*.
+- `../android_apps/slow-feeder-ble-protocol.md` — protocol reference
+  (live wire captures, fw 1.19.12).
+- `asf02` PyPI project page / repo README — current library API.
