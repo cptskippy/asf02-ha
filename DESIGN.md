@@ -1,9 +1,10 @@
 # ASF02 Feeder — Home Assistant Integration Design
 
-Status: **design spec** (not yet implemented)
-Date: 2026-09-11; revised 2026-09-18 (aligned with published `asf02` 0.1.0 API and
-`INTEGRATION_GUIDE.md`)
-Library: [`asf02`](https://pypi.org/project/asf02/) v0.1.x (sibling repo, on PyPI)
+Status: **design spec — FINAL for v1** (not yet implemented)
+Date: 2026-09-11; revised 2026-09-18 (hardware findings, `asf02` 0.1.0 API);
+finalized 2026-09-29 (open decisions resolved: §7.1 battery device class,
+§7.4 service blocking model, §14 task list)
+Library: [`asf02`](https://pypi.org/project/asf02/) v0.2.x (`client_factory` seam; see §3.1)
 HA target: current core (dev-branch APIs verified 2026-09-11; see §13 Sources)
 
 ---
@@ -306,7 +307,7 @@ data source.
 
 | Entity | Type | Source | Notes |
 |--------|------|--------|-------|
-| `sensor.<dev>_battery` | `SensorDeviceClass.BATTERY` | `battery_raw` → native | raw value + **`battery_low` binary sensor** from the vendor threshold: `b ≤ 410` = low (app source-verified 2026-09-12). Raw unit still unconfirmed (NiMH fresh ≈522, adapter ≈428–461) — expose raw as-is; a 0–100% gauge can come later calibrated against the 410 threshold |
+| `sensor.<dev>_battery` | no device class — raw number | `battery_raw` | **No `BATTERY` device class**: it assumes 0–100%, but the raw value is power-source-dependent (522–524 fresh NiMH, 428–461 adapter — §3.2) and would render as a nonsense percentage. Expose the raw number with attributes; the actionable semantic is `binary_sensor.<dev>_battery_low` (`b ≤ 410`, vendor-app-verified). A calibrated gauge is a future option flow (calibrate against the 410 threshold + user-reported full/empty) |
 | `sensor.<dev>_feed_count` | `SensorDeviceClass.TOTAL_INCREASING` | `feed_count` | `state_class: TOTAL_INCREASING`. Counts **portions**; increments **live, ~1 per portion, while the motor runs** (verified 2026-09-18 on feed(50): climbed steadily during `s=1`). Earlier note "update arrives on the post-feed re-read" is superseded — polling during a feed sees progress. |
 | `sensor.<dev>_schedule` | `SensorDeviceClass.TIMESTAMP`? **No** — text | schedule | `native_value`: human string `"15:30 ×1 · 16:00 ×1"` (or `—`); **attributes**: `slots_0..9` = `"15:30|1|on"` per slot + `entry_count`. Automations can read attributes for machine use |
 | `sensor.<dev>_device_time` | `SensorDeviceClass.TIMESTAMP` | last `info`/unlock `t` + tz | shows what the *device* thinks the time is (drift diagnostic) |
@@ -335,7 +336,7 @@ relying on the binary sensor window.
 
 | Service | Fields | Behavior |
 |---------|--------|----------|
-| `asf02_feed` | `portions: int (1..99)` | single session: unlock → `feed(n)` (ACK `true` ~90 ms) → **stay connected** and poll `status()` every ~3 s until `s==0` (mid-feed polling verified reliable 2026-09-18: 11/11 probes on feed(2), 80/80 on feed(50), zero link drops on adapter *and* fresh-battery power). This yields live progress via `feed_count` and an accurate completion signal (~5.1 s/portion; feed(50) ran 250 s). **Fallback**: if the link drops mid-feed (observed once in earlier sessions, never reproduced in the 2026-09-18 probes) → disconnect, wait remaining estimate (`n × 5.1 s + 10 s`, capped), reconnect+unlock, read status. Returns `{"fed": true, "portions": n, "feed_count": N}`. Errors: `HomeAssistantError` with the ASF02 error text (locked/in-range/timeout). |
+| `asf02_feed` | `portions: int (1..99)`, `wait: bool = false` | **Non-blocking by default**: one session — unlock → `feed(n)` (ACK `true` ~90 ms) → disconnect. Triggers an immediate coordinator refresh so `feed_count`/`feeding` update right away. Returns `{"fed": true, "portions": n, "feed_count": N}`. **`wait: true`** (automation/CLI use): stay connected and poll `status()` every ~3 s until `s==0` — mid-feed polling is verified reliable (2026-09-18: 91/91 polls across feed 1/2/3/50, zero link drops on adapter *and* fresh-battery power). Progress is visible live either way because `n` increments per portion. **Fallback** (wait mode only): if the link drops mid-feed (observed once pre-2026-09-18, never since) → disconnect, wait remaining estimate (`n × 5.1 s + 10 s`, capped), reconnect+unlock, read status. Errors: `HomeAssistantError` with the ASF02 error text (locked/out-of-range/timeout). Default non-blocking because `feed(50)` ≈ 250 s — a service call that long would tie up the caller for ~4 min for no UI benefit |
 | `asf02_stop` | — | `stop()`; returns `{"ok": true}`. **Verified cancel semantics (2026-09-18):** called mid-feed it stops the dispense *before* any portion counts — `n`/`t` delta was 0 for a `feed(3)` stopped at ~2 s. Safe to expose as a "stop feeding" button; it cannot double-count. |
 | `asf02_set_schedule` | `entries: list[{time: "HH:MM", portion: int(1..9), enabled: bool = true}]` max 10 | full-array replace (the only reliable write form, live-verified); uses the **write-response echo** as confirmation (read-back is unreliable on fw 1.19.12); refreshes coordinator; returns the stored slots |
 | `asf02_clear_schedule` | — | `set_schedule([])` |
@@ -470,30 +471,83 @@ One `DeviceInfo` per feeder: `identifiers={(DOMAIN, address)}`,
   but its `BluetoothClient` example does **not** match current core API;
   treated as historical, not normative.
 
-## 14. Implementation plan (after spec approval)
+## 14. Implementation plan (task list)
 
-Status notes (2026-09-18): `asf02` 0.1.0 is **published on PyPI** and
-verified against the live spare feeder (connect → unlock → info → status,
-clean session). The `client_factory` seam (§3.1) is confirmed **not** in
-0.1.0 — it is the gating change.
+Status (2026-09-29): `asf02` 0.1.0 is published on PyPI and verified against
+the live spare feeder. The `client_factory` seam is implemented, tested
+(27/27), and pushed on branch `v0.2-docs-and-seam` in the asf02 repo —
+**not yet released**; 0.2.0 must land on PyPI before T2.
 
-1. **Library v0.2**: `client_factory` injection seam (§3.1; small,
-   backwards compatible) + release to PyPI. (Also corrects the README
-   battery-unit wording.) *Everything below is blocked on this.*
-2. **Skeleton**: manifest (per §4, incl. `version`), `__init__.py`
-   (entry setup/unload, coordinator wiring), device registry, no entities
-   yet. Load in HA, confirm entry setup with the spare.
-3. **Config flow**: discovery + manual + token + generate-token paths
-   (follow the patterns in `INTEGRATION_GUIDE.md` §5).
-4. **Sensors + binary sensors + event** (from `FeederSnapshot`).
-5. **Services** (feed/stop/set/clear).
-6. **Test suite** (§12.2) to green, then **live acceptance** (§12.3).
-7. **Polish**: options flow, README (proxy requirements, token recovery),
-   HACS publish (manifest `version` == repo tag; see
-   `INTEGRATION_GUIDE.md` §11).
+Task states: ☐ open · ⛔ blocked on T1 · everything else sequential (T2 → T9).
 
-Each step is independently shippable; 1 is a prerequisite for everything
-else.
+### T1 — Release `asf02` 0.2.0 to PyPI (asf02 repo)
+- ☐ Merge `v0.2-docs-and-seam` (2 commits: probe-findings docs; `client_factory` seam + 2 tests)
+- ☐ Bump `pyproject.toml` version → `0.2.0`; commit
+- ☐ Tag `v0.2.0` → GitHub Actions `publish.yml` uploads to PyPI (trusted publishing)
+- ☐ Verify: `pip download asf02==0.2.0` succeeds; `ASF02Client(..., client_factory=...)` importable in a venv
+- *Acceptance*: `asf02 0.2.0` live on PyPI; README Home Assistant section accurate.
+
+### T2 — Integration skeleton (asf02-ha repo)
+Files: `custom_components/asf02/{__init__.py, manifest.json, const.py, coordinator.py}`
+- ☐ `manifest.json` per §4 exactly (`version: "0.1.0"`, `integration_type: device`, `bluetooth_adapters` dep, `asf02>=0.2,<0.3`)
+- ☐ `const.py`: domain, `CONF_ADDRESS/CONF_TOKEN/CONF_TZ_OFFSET/CONF_NAME`, defaults (15-min poll, 410 battery threshold)
+- ☐ `coordinator.py`: `FeederSnapshot` (§6.2), `ASF02Coordinator(DataUpdateCoordinator)` with:
+  - `asyncio.Lock` session serialization (§8.2)
+  - `async_ble_device_from_address(hass, address, connectable=True)` + injected `client_factory` (§3.1)
+  - per-session `unlock()` + `sync_time(tz_offset)` (§6.1, §8.3–8.4)
+  - `hash(address) % 300` stagger offset (§6.1)
+  - `UpdateFailed` mapping: `ASF02LockedError` → setup error (token problem, no retry); timeout/unreachable → `UpdateFailed` (§8.5)
+- ☐ `__init__.py`: entry setup → coordinator → `async_forward_entry_setups`; unload path; `async_track_unavailable` wiring (§6.3)
+- *Acceptance*: loads in HA dev instance; `hass.config_entries` shows entry; coordinator logs clean session (connect→unlock→sync→info→status→schedule→disconnect) against the spare; `hass.config_entries.async_remove` tears down cleanly.
+
+### T3 — Config flow
+Files: `custom_components/asf02/config_flow.py`
+- ☐ `SOURCE_BLUETOOTH`: manifest matcher (`local_name: ASF02-*`) → device picker step (name, MAC, RSSI, source adapter); reject non-connectable sources with the clear error (§4 note)
+- ☐ `SOURCE_USER`: manual MAC entry
+- ☐ token step: 10-alphanumeric pattern; "generate new token and pair" checkbox with explicit re-pair confirmation wording (§5)
+- ☐ validation on submit: fresh `async_process_advertisements`, `unlock()` round-trip with injected client; `ASF02LockedError` → form error with token-recovery hint
+- ☐ `unique_id = address` uppercase (§10); abort on existing entry
+- ☐ entry data: `address`, `token`, `tz_offset_seconds` (default from HA config), `name`
+- *Acceptance*: all four paths exercised in a live dev instance — discovery (dongle), manual MAC, existing token, generated-token re-pair; wrong token shows the form error and creates no entry.
+
+### T4 — Entities
+Files: `custom_components/asf02/{sensor.py, binary_sensor.py}`
+- ☐ sensors per §7.1 (battery **no device class**, feed_count `TOTAL_INCREASING`, schedule text + `slots_*` attributes, device_time timestamp); common attributes `firmware`/`serial`/`hw_version`/`fetched_at`/`source`
+- ☐ binary sensors per §7.2 (`feeding` from `status.s`, `battery_low` from `b ≤ 410`, `fed_recently` 10-min window via snapshot comparison in coordinator)
+- ☐ `asf02.feed` bus event on count increment (§7.3)
+- ☐ `DeviceInfo` per §7.5 (identifiers, connections, via_device best-effort)
+- *Acceptance*: spare feeder shows all entities with sane values; `hass.states.get` matches a manual library session read; event fires on a test feed.
+
+### T5 — Services
+Files: `custom_components/asf02/services.yaml` (+ handlers in `__init__.py`)
+- ☐ `asf02_feed` (portions 1..99, `wait` default false — §7.4), `asf02_stop`, `asf02_set_schedule` (full-array replace, `HH:MM` validation, echo-as-confirmation), `asf02_clear_schedule`
+- ☐ each handler: resolve entity_id → coordinator → take the coordinator's session lock (never a parallel GATT session)
+- *Acceptance*: `feed(2)` dispenses 2 portions, counter +2, event fires, non-blocking return < 15 s; `feed(3, wait=true)` returns only after `s==0`; `stop` mid-feed cancels with no counter change (§7.4 verified semantics); schedule set persists (ground truth: vendor app read-back).
+
+### T6 — Unit test suite to green
+Files: `tests/*` (`pytest-homeassistant-custom-component`)
+- ☐ config flow: discovery→token→validate→entry; wrong token; non-connectable source rejection; duplicate entry abort
+- ☐ coordinator: success, `UpdateFailed` (out of range), `ASF02LockedError` → setup error, lock serialization
+- ☐ entities: values + attributes from a fixture snapshot; `fed_recently` window; event firing
+- ☐ services: all four, including `wait` polling loop (fake client that reports `s=1` for 2 polls)
+- *Acceptance*: `pytest tests/` green, no live hardware needed (injected-factory fake `ASF02Client` + faked `async_ble_device_from_address`).
+
+### T7 — Live acceptance (§12.3 checklist)
+- ☐ all 9 checklist items against the spare feeder (dongle, then ESPHome proxy only with dongle unplugged)
+- ☐ then the in-use feeder (second config entry coexists; stagger verified in logs)
+- *Acceptance*: every box in §12.3 checked, with a note of fw version per unit.
+
+### T8 — Soak test (§12.4)
+- ☐ 48 h, 4 feeders, 1 proxy, 15-min poll; watch HA logs for slot exhaustion / BlueZ errors; confirm battery-low transition if batteries allow
+- *Acceptance*: no unrecoverable setup errors; at most transient `UpdateFailed`s that auto-recover.
+
+### T9 — Polish & publish
+- ☐ options flow v1.1: poll interval (5 min–1 h), timezone override, battery threshold
+- ☐ README: setup via HACS, ESPHome `bluetooth_proxy active: true` requirement, token recovery procedure, vendor-app-contention note
+- ☐ `hassfest` + HACS validation (manifest `version` == repo tag); tag `v0.1.0`
+- *Acceptance*: fresh HA + HACS install of the repo works end-to-end.
+
+**Explicitly out of scope for v1** (logged here so they don't resurface as scope): log entity (Q1), battery % gauge, OTA service, sibling OEM models, `status.u`/`d` beyond raw attribute, schedule read-back as write confirmation (echo only), token changes via options (token recovery is always the config flow's re-pair path).
 
 ## 15. Companion documents
 
