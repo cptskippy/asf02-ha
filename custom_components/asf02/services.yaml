@@ -1,0 +1,65 @@
+feed:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: asf02
+    portions:
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 99
+          mode: box
+          step: 1
+    wait:
+      required: false
+      default: false
+      selector:
+        boolean:
+stop:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: asf02
+set_schedule:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: asf02
+    entries:
+      required: true
+      selector:
+        repeat:
+          max: 10
+          fields:
+            time:
+              required: true
+              selector:
+                time:
+            portion:
+              required: true
+              selector:
+                number:
+                  min: 1
+                  max: 9
+                  mode: box
+                  step: 1
+            enabled:
+              required: false
+              default: true
+              selector:
+                boolean:
+clear_schedule:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: asf02

@@ -1,0 +1,32 @@
+"""Constants for the ASF02 pet feeder integration."""
+
+from homeassistant.const import Platform
+
+DOMAIN = "asf02"
+
+CONF_ADDRESS = "address"
+CONF_TOKEN = "token"
+CONF_TZ_OFFSET = "tz_offset_seconds"
+
+DEFAULT_POLL_MINUTES = 15
+MIN_POLL_MINUTES = 5
+MAX_POLL_MINUTES = 60
+
+OPTION_POLL_MINUTES = "poll_minutes"
+
+BATTERY_LOW_THRESHOLD = 410
+
+EVENT_FEED = "asf02_feed"
+
+# Mid-feed feed() polling / completion-wait tuning.
+FEED_SECONDS_PER_PORTION = 5.1  # measured 2026-09-18
+FEED_WAIT_POLL_INTERVAL = 3.0  # s between status() polls
+FEED_WAIT_MARGIN = 10.0  # s added to the remaining-estimate fallback
+FEED_WAIT_TIMEOUT = 900.0  # s hard cap for wait=True
+
+FED_RECENTLY_WINDOW_SECONDS = 600
+
+MANUFACTURER = "Hong Kong M Spacer Limited"
+MODEL = "CWH01L-A1"
+
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]

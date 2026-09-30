@@ -1,0 +1,112 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ASF02 Pet Feeder",
+        "description": "Enter the feeder's MAC address (shown in the vendor app, or the last six characters are in its advertised name).",
+        "data": {
+          "address": "MAC address"
+        },
+        "data_description": {
+          "address": "Full MAC address, e.g. AA:BB:CC:DD:EE:FF"
+        }
+      },
+      "token": {
+        "title": "Pairing token",
+        "description": "Enter the 10-character pairing token from the vendor app. Lost it? Check 'Generate a new token' — this re-pairs the feeder and the old token stops working.",
+        "data": {
+          "generate_token": "Generate a new token and re-pair the feeder (old token is discarded)",
+          "token": "Pairing token"
+        }
+      }
+    },
+    "error": {
+      "invalid_token": "That doesn't look like a 10-character token, or the feeder rejected it.",
+      "invalid_mac": "That doesn't look like a valid MAC address.",
+      "cannot_connect": "Couldn't reach the feeder over Bluetooth. Check the adapter/proxy and try again."
+    },
+    "abort": {
+      "already_configured": "This feeder is already configured.",
+      "scanner_not_connectable": "{name} was seen by an advertisement-only scanner that can't carry a GATT connection. Use a local Bluetooth adapter or an ESPHome bluetooth_proxy with active: true."
+    }
+  },
+  "services": {
+    "feed": {
+      "fields": {
+        "entity_id": {
+          "name": "Entity"
+        },
+        "portions": {
+          "name": "Portions",
+          "description": "How many portions to dispense (1-99)."
+        },
+        "wait": {
+          "name": "Wait for completion",
+          "description": "Block until the dispense finishes (up to ~15 min for large counts). Off by default: returns right after the feed command is accepted; progress is visible in the feed count sensor."
+        }
+      }
+    },
+    "stop": {
+      "fields": {
+        "entity_id": {
+          "name": "Entity"
+        }
+      }
+    },
+    "set_schedule": {
+      "fields": {
+        "entity_id": {
+          "name": "Entity"
+        },
+        "entries": {
+          "name": "Schedule entries",
+          "description": "Replaces the entire 10-slot schedule."
+        }
+      }
+    },
+    "clear_schedule": {
+      "fields": {
+        "entity_id": {
+          "name": "Entity"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ASF02 Options",
+        "data": {
+          "poll_minutes": "Poll interval (minutes)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery": {
+        "name": "Battery"
+      },
+      "feed_count": {
+        "name": "Feed count"
+      },
+      "schedule": {
+        "name": "Schedule"
+      },
+      "device_time": {
+        "name": "Device time"
+      }
+    },
+    "binary_sensor": {
+      "feeding": {
+        "name": "Feeding"
+      },
+      "battery_low": {
+        "name": "Battery low"
+      },
+      "fed_recently": {
+        "name": "Fed recently"
+      }
+    }
+  }
+}

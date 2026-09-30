@@ -68,39 +68,48 @@ the right adapter/proxy). Fix (small library patch, backwards compatible):
 
 ```python
 # asf02/client.py
-BleakClientFactory = Callable[..., "BleakClient"]  # like bleak's own factory
+BleakClientFactory = Callable[[str], Any]  # like bleak's own factory
 
 class ASF02Client:
-    def __init__(self, address, token, *, client_factory: BleakClientFactory = BleakClient, ...):
+    def __init__(self, address, token, *, client_factory: BleakClientFactory | None = None, ...):
         ...
     async def connect(self):
         client = self._client_factory(self.address)
         ...
 ```
 
-The integration supplies:
-
-```python
-ble_device = bluetooth.async_ble_device_from_address(hass, address, connectable=True)
-async with ASF02Client(address, token, client_factory=lambda addr: ble_device) as feeder:
-    ...
-```
-
-`async_ble_device_from_address` returns a `HaBleakClientWrapper` (HA core
-`bluetooth/api.py`, verified 2026-09-11) — a `BleakClient`-compatible
-object that participates in HA's slot manager. No HA imports leak into the
-library; a non-HA caller gets the exact same code path as today.
-
-> **Status (verified 2026-09-18 against published `asf02` 0.1.0):** the
-> shipped constructor is `ASF02Client(address, token, *, response_timeout,
-> post_connect_delay)` and `connect()` builds `BleakClient(self.address,
-> timeout=20)` internally — so this seam does **not exist yet** and is a
-> prerequisite for any integration work (plan item 1).
-
-> Note: older guides (e.g. ha-petkit-ble's `BluetoothClient` helper)
-> predate the current API. The verified current path is
-> `async_ble_device_from_address` + injecting the returned device as the
-> client. `bluetooth.async_connect` does not exist in current core.
+> **Corrected 2026-09-30 against current core + habluetooth 7.1.2 source**
+> (the earlier version of this section was wrong about what
+> `async_ble_device_from_address` returns):
+>
+> - `bluetooth.async_ble_device_from_address(hass, addr, connectable=True)`
+>   returns the **advertisement-history `BLEDevice | None`** — it has no
+>   client surface (no `connect`/`write_gatt_char`). It is used as the
+>   *reachability check* and as the *device argument* for the client.
+> - The managed client is **`habluetooth.HaBleakClientWrapper`** (a real
+>   `BleakClient` subclass; HA core re-exports it). Its `connect()` picks
+>   the best scanner/connector backend, allocates the connection slot
+>   (`manager.async_allocate_connection_slot`), and routes the GATT session
+>   through it — local dongle or ESPHome proxy.
+> - Build it via **`bleak_retry_connector.establish_connection`** (retry
+>   semantics + marks `_is_retry_client=True`, which the wrapper checks —
+>   a raw `wrapper.connect()` logs a warning). `establish_connection`
+>   returns an already-connected client.
+> - The integration therefore supplies
+>   `client_factory=lambda addr: _ManagedClient(hass, addr, ...)`, where
+>   `_ManagedClient` is a thin proxy exposing the bleak-client surface; its
+>   `connect()` resolves the ad-device and returns
+>   `await establish_connection(HaBleakClientWrapper, ble_device, addr)`.
+>   (See `custom_components/asf02/managed_client.py`; same shape as
+>   `specialized_turbo`'s `client_factory`.)
+> - Availability is **not** a coordinator method — there is no
+>   `set_unavailable`/`set_available`/`async_track_available`. The
+>   integration subclasses `ActiveBluetoothDataUpdateCoordinator`
+>   (core `bluetooth/active_update_coordinator.py`), whose passive base
+>   registers the ad callback + `async_track_unavailable` on
+>   `coordinator.async_start()` and flips `available` automatically.
+> - First-poll stagger uses `crc32(address)`, not `hash(address)`: str
+>   hashing is salted per process and would re-shuffle on every restart.
 
 ### 3.2 Hardware findings, 2026-09-18 (dedicated probes, fw 1.19.12)
 
@@ -473,21 +482,21 @@ One `DeviceInfo` per feeder: `identifiers={(DOMAIN, address)}`,
 
 ## 14. Implementation plan (task list)
 
-Status (2026-09-29): `asf02` 0.1.0 is published on PyPI and verified against
-the live spare feeder. The `client_factory` seam is implemented, tested
-(27/27), and pushed on branch `v0.2-docs-and-seam` in the asf02 repo —
-**not yet released**; 0.2.0 must land on PyPI before T2.
+Status (2026-09-30): `asf02` **0.2.1 is live on PyPI** (client_factory seam +
+verified mid-feed docs). Tasks T2–T5 are implemented on branch
+`integration-v1` (manifest, coordinator on
+`ActiveBluetoothDataUpdateCoordinator`, managed-client seam, config flow +
+options, sensors, binary sensors, services) — pending the T6 test suite and
+live acceptance.
 
-Task states: ☐ open · ⛔ blocked on T1 · everything else sequential (T2 → T9).
+Task states: ✅ done · ⬜ open · T6 next, then T7 → T9.
 
-### T1 — Release `asf02` 0.2.0 to PyPI (asf02 repo)
-- ☐ Merge `v0.2-docs-and-seam` (2 commits: probe-findings docs; `client_factory` seam + 2 tests)
-- ☐ Bump `pyproject.toml` version → `0.2.0`; commit
-- ☐ Tag `v0.2.0` → GitHub Actions `publish.yml` uploads to PyPI (trusted publishing)
-- ☐ Verify: `pip download asf02==0.2.0` succeeds; `ASF02Client(..., client_factory=...)` importable in a venv
-- *Acceptance*: `asf02 0.2.0` live on PyPI; README Home Assistant section accurate.
+### T1 — Release `asf02` 0.2.x to PyPI (asf02 repo) — ✅ 0.2.1 published
+- ✅ `client_factory` seam merged (PR #4) and released; user published **0.2.1**
+  to PyPI (verified: `client_factory` param present on `ASF02Client.__init__`).
+- *Acceptance (met)*: `asf02 0.2.1` live on PyPI.
 
-### T2 — Integration skeleton (asf02-ha repo)
+### T2 — Integration skeleton (asf02-ha repo) — ⬜ implemented, untested
 Files: `custom_components/asf02/{__init__.py, manifest.json, const.py, coordinator.py}`
 - ☐ `manifest.json` per §4 exactly (`version: "0.1.0"`, `integration_type: device`, `bluetooth_adapters` dep, `asf02>=0.2,<0.3`)
 - ☐ `const.py`: domain, `CONF_ADDRESS/CONF_TOKEN/CONF_TZ_OFFSET/CONF_NAME`, defaults (15-min poll, 410 battery threshold)
@@ -500,7 +509,7 @@ Files: `custom_components/asf02/{__init__.py, manifest.json, const.py, coordinat
 - ☐ `__init__.py`: entry setup → coordinator → `async_forward_entry_setups`; unload path; `async_track_unavailable` wiring (§6.3)
 - *Acceptance*: loads in HA dev instance; `hass.config_entries` shows entry; coordinator logs clean session (connect→unlock→sync→info→status→schedule→disconnect) against the spare; `hass.config_entries.async_remove` tears down cleanly.
 
-### T3 — Config flow
+### T3 — Config flow — ⬜ implemented, untested
 Files: `custom_components/asf02/config_flow.py`
 - ☐ `SOURCE_BLUETOOTH`: manifest matcher (`local_name: ASF02-*`) → device picker step (name, MAC, RSSI, source adapter); reject non-connectable sources with the clear error (§4 note)
 - ☐ `SOURCE_USER`: manual MAC entry
@@ -510,7 +519,7 @@ Files: `custom_components/asf02/config_flow.py`
 - ☐ entry data: `address`, `token`, `tz_offset_seconds` (default from HA config), `name`
 - *Acceptance*: all four paths exercised in a live dev instance — discovery (dongle), manual MAC, existing token, generated-token re-pair; wrong token shows the form error and creates no entry.
 
-### T4 — Entities
+### T4 — Entities — ⬜ implemented, untested
 Files: `custom_components/asf02/{sensor.py, binary_sensor.py}`
 - ☐ sensors per §7.1 (battery **no device class**, feed_count `TOTAL_INCREASING`, schedule text + `slots_*` attributes, device_time timestamp); common attributes `firmware`/`serial`/`hw_version`/`fetched_at`/`source`
 - ☐ binary sensors per §7.2 (`feeding` from `status.s`, `battery_low` from `b ≤ 410`, `fed_recently` 10-min window via snapshot comparison in coordinator)
@@ -518,7 +527,7 @@ Files: `custom_components/asf02/{sensor.py, binary_sensor.py}`
 - ☐ `DeviceInfo` per §7.5 (identifiers, connections, via_device best-effort)
 - *Acceptance*: spare feeder shows all entities with sane values; `hass.states.get` matches a manual library session read; event fires on a test feed.
 
-### T5 — Services
+### T5 — Services — ⬜ implemented, untested
 Files: `custom_components/asf02/services.yaml` (+ handlers in `__init__.py`)
 - ☐ `asf02_feed` (portions 1..99, `wait` default false — §7.4), `asf02_stop`, `asf02_set_schedule` (full-array replace, `HH:MM` validation, echo-as-confirmation), `asf02_clear_schedule`
 - ☐ each handler: resolve entity_id → coordinator → take the coordinator's session lock (never a parallel GATT session)

@@ -1,0 +1,17 @@
+{
+  "domain": "asf02",
+  "name": "ASF02 Pet Feeder",
+  "version": "0.1.0",
+  "codeowners": ["@cptskippy"],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "bluetooth": [
+    {
+      "local_name": "ASF02-*",
+      "connectable": true
+    }
+  ],
+  "requirements": ["asf02>=0.2.1,<0.3"]
+}
