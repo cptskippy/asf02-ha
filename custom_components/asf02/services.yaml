@@ -1,4 +1,10 @@
 feed:
+  system: true
+  is_advanced: true
+  description: >-
+    Dispense portions immediately. Non-blocking by default (returns the
+    device's near-instant ACK); set wait to block until the dispense
+    completes.
   fields:
     entity_id:
       required: true
@@ -20,6 +26,11 @@ feed:
       selector:
         boolean:
 stop:
+  system: true
+  is_advanced: true
+  description: >-
+    Stop an in-progress dispense. Safe no-op when the feeder is idle;
+    cancels before any portion counts.
   fields:
     entity_id:
       required: true
@@ -27,6 +38,11 @@ stop:
         entity:
           integration: asf02
 set_schedule:
+  system: true
+  is_advanced: true
+  description: >-
+    Replace the entire 10-slot schedule. The write response (the
+    device-confirmed slot array) is the authoritative confirmation.
   fields:
     entity_id:
       required: true
@@ -57,6 +73,9 @@ set_schedule:
               selector:
                 boolean:
 clear_schedule:
+  system: true
+  is_advanced: true
+  description: Remove all schedule entries.
   fields:
     entity_id:
       required: true

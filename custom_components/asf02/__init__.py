@@ -6,13 +6,15 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from asf02 import ASF02Error
 from bleak import BleakError
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ADDRESS
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.const import CONF_ADDRESS, CONF_ENTITY_ID
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
+
+from asf02 import ASF02Error
 
 from .const import (
     CONF_TOKEN,
@@ -42,7 +44,7 @@ SCHEDULE_ENTRY_SCHEMA = vol.Schema(
     }
 )
 
-ENTITY_IDS_SCHEMA = {cv.ENTITY_IDS: cv.entity_ids}
+ENTITY_IDS_SCHEMA = {CONF_ENTITY_ID: cv.entity_ids}
 
 SERVICE_FEED_SCHEMA = vol.Schema(
     {
@@ -53,13 +55,15 @@ SERVICE_FEED_SCHEMA = vol.Schema(
 )
 SERVICE_STOP_SCHEMA = vol.Schema(ENTITY_IDS_SCHEMA)
 SERVICE_SET_SCHEDULE_SCHEMA = vol.Schema(
-    {vol.Required(CONF_ENTRIES): vol.All(cv.ensure_list, [SCHEDULE_ENTRY_SCHEMA]), **ENTITY_IDS_SCHEMA}
+    {
+        vol.Required(CONF_ENTRIES): vol.All(cv.ensure_list, [SCHEDULE_ENTRY_SCHEMA]),
+        **ENTITY_IDS_SCHEMA,
+    }
 )
 SERVICE_CLEAR_SCHEDULE_SCHEMA = vol.Schema(ENTITY_IDS_SCHEMA)
 
 
-@callback
-def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up the integration (register services once)."""
     if not hass.services.has_service(DOMAIN, SERVICE_FEED):
         _register_services(hass)
@@ -96,11 +100,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ASF02ConfigEntry) -> bo
 # ---------------------------------------------------------------------------
 # Services
 # ---------------------------------------------------------------------------
-def _coordinator_for(hass: HomeAssistant, service: ServiceCall, entity_id: str) -> ASF02Coordinator:
+def _coordinator_for(service: ServiceCall, entity_id: str) -> ASF02Coordinator:
     """Resolve an ASF02 entity_id to its entry's coordinator."""
+    hass = service.hass
     registry = er.async_get(hass)
     reg = registry.async_get(entity_id)
-    if reg is None or reg.domain != DOMAIN:
+    if reg is None or reg.platform != DOMAIN:
         raise HomeAssistantError(f"{entity_id} is not an ASF02 entity")
     entry = hass.config_entries.async_get_entry(reg.config_entry_id)
     if entry is None:
@@ -115,27 +120,27 @@ def _parse_time(value: str) -> tuple[int, int]:
     return hour, minute
 
 
-async def _async_feed(hass: HomeAssistant, service: ServiceCall) -> None:
+async def _async_feed(service: ServiceCall) -> None:
     portions = service.data[CONF_PORTIONS]
     wait = service.data[CONF_WAIT]
-    for entity_id in service.data[cv.ENTITY_IDS]:
-        coordinator = _coordinator_for(hass, service, entity_id)
+    for entity_id in service.data[CONF_ENTITY_ID]:
+        coordinator = _coordinator_for(service, entity_id)
         try:
             await coordinator.async_feed(portions, wait=wait)
         except (BleakError, ASF02Error, TimeoutError) as err:
             raise HomeAssistantError(f"feed failed: {err}") from err
 
 
-async def _async_stop(hass: HomeAssistant, service: ServiceCall) -> None:
-    for entity_id in service.data[cv.ENTITY_IDS]:
-        coordinator = _coordinator_for(hass, service, entity_id)
+async def _async_stop(service: ServiceCall) -> None:
+    for entity_id in service.data[CONF_ENTITY_ID]:
+        coordinator = _coordinator_for(service, entity_id)
         try:
             await coordinator.async_stop()
         except (BleakError, ASF02Error, TimeoutError) as err:
             raise HomeAssistantError(f"stop failed: {err}") from err
 
 
-async def _async_set_schedule(hass: HomeAssistant, service: ServiceCall) -> None:
+async def _async_set_schedule(service: ServiceCall) -> None:
     raw_entries = service.data[CONF_ENTRIES]
     if len(raw_entries) > 10:
         raise HomeAssistantError("Max 10 schedule entries")
@@ -148,8 +153,8 @@ async def _async_set_schedule(hass: HomeAssistant, service: ServiceCall) -> None
         )
         for item in raw_entries
     ]
-    for entity_id in service.data[cv.ENTITY_IDS]:
-        coordinator = _coordinator_for(hass, service, entity_id)
+    for entity_id in service.data[CONF_ENTITY_ID]:
+        coordinator = _coordinator_for(service, entity_id)
         try:
             await coordinator.async_set_schedule(entries)
         except (BleakError, ASF02Error, TimeoutError) as err:
@@ -158,9 +163,9 @@ async def _async_set_schedule(hass: HomeAssistant, service: ServiceCall) -> None
             raise HomeAssistantError(str(err)) from err
 
 
-async def _async_clear_schedule(hass: HomeAssistant, service: ServiceCall) -> None:
-    for entity_id in service.data[cv.ENTITY_IDS]:
-        coordinator = _coordinator_for(hass, service, entity_id)
+async def _async_clear_schedule(service: ServiceCall) -> None:
+    for entity_id in service.data[CONF_ENTITY_ID]:
+        coordinator = _coordinator_for(service, entity_id)
         try:
             await coordinator.async_clear_schedule()
         except (BleakError, ASF02Error, TimeoutError) as err:
@@ -168,16 +173,17 @@ async def _async_clear_schedule(hass: HomeAssistant, service: ServiceCall) -> No
 
 
 def _register_services(hass: HomeAssistant) -> None:
-    """Register the ASF02 services (admin: they drive the hardware)."""
-    hass.services.async_register_admin(
-        DOMAIN, SERVICE_FEED, _async_feed, schema=SERVICE_FEED_SCHEMA
-    )
-    hass.services.async_register_admin(
-        DOMAIN, SERVICE_STOP, _async_stop, schema=SERVICE_STOP_SCHEMA
-    )
-    hass.services.async_register_admin(
+    """Register the ASF02 services.
+
+    Admin-only (``system: true`` in services.yaml — they drive the
+    hardware); the registry itself has no admin variant, the frontend
+    filters on the flag.
+    """
+    hass.services.async_register(DOMAIN, SERVICE_FEED, _async_feed, schema=SERVICE_FEED_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_STOP, _async_stop, schema=SERVICE_STOP_SCHEMA)
+    hass.services.async_register(
         DOMAIN, SERVICE_SET_SCHEDULE, _async_set_schedule, schema=SERVICE_SET_SCHEDULE_SCHEMA
     )
-    hass.services.async_register_admin(
+    hass.services.async_register(
         DOMAIN, SERVICE_CLEAR_SCHEDULE, _async_clear_schedule, schema=SERVICE_CLEAR_SCHEDULE_SCHEMA
     )

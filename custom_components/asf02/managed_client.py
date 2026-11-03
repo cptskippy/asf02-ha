@@ -32,7 +32,6 @@ from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from bleak_retry_connector import establish_connection
 from habluetooth import HaBleakClientWrapper
-
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 
@@ -85,9 +84,7 @@ class _ManagedClient:
     def __getattr__(self, name: str) -> Any:
         client = self.__dict__.get("_client", _UNCONNECTED)
         if client is _UNCONNECTED:
-            raise AttributeError(
-                f"_ManagedClient: {name!r} accessed before connect()"
-            )
+            raise AttributeError(f"_ManagedClient: {name!r} accessed before connect()")
         return getattr(client, name)
 
     async def connect(self) -> None:
@@ -117,9 +114,7 @@ class _ManagedClient:
         await client.disconnect()
 
 
-def make_client_factory(
-    hass: HomeAssistant, address: str, name: str
-) -> Any:
+def make_client_factory(hass: HomeAssistant, address: str, name: str) -> Any:
     """Build the ``client_factory`` callable for ``ASF02Client``.
 
     Exposed as a function (rather than a closure literal) so tests can
@@ -130,8 +125,6 @@ def make_client_factory(
         _LOGGER.debug("%s: GATT link dropped: %s", name, address)
 
     def factory(addr: str) -> _ManagedClient:
-        return _ManagedClient(
-            hass, addr, name, disconnected_callback=_disconnected
-        )
+        return _ManagedClient(hass, addr, name, disconnected_callback=_disconnected)
 
     return factory

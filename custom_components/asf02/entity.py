@@ -8,20 +8,18 @@ from homeassistant.components.bluetooth.passive_update_coordinator import (
     PassiveBluetoothCoordinatorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
+from homeassistant.helpers.device_registry import (
     CONNECTION_BLUETOOTH,
+    DeviceInfo,
 )
-from homeassistant.helpers.device_registry import DeviceInfo
 
-from .const import CONF_ADDRESS, DOMAIN, MANUFACTURER, MODEL
+from .const import DOMAIN, MANUFACTURER, MODEL
 from .coordinator import ASF02Coordinator, FeederSnapshot
 
 type ASF02ConfigEntry = ConfigEntry[ASF02Coordinator]
 
 
-class ASF02CoordinatorEntity(
-    PassiveBluetoothCoordinatorEntity[ASF02Coordinator]
-):
+class ASF02CoordinatorEntity(PassiveBluetoothCoordinatorEntity[ASF02Coordinator]):
     """Base for all ASF02 entities.
 
     Availability is ad-driven (inherited): the passive base flips

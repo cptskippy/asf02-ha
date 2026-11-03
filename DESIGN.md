@@ -433,11 +433,30 @@ One `DeviceInfo` per feeder: `identifiers={(DOMAIN, address)}`,
 
 1. **Library** (done): 25 unit tests against captured wire traffic; E2E
    against the spare feeder via `examples/cli.py`.
-2. **Integration unit tests**: `pytest-homeassistant-custom-component`;
-   mock `ASF02Client` (the injected-client seam makes this clean — monkeypatch
-   the factory), fake `bluetooth.async_ble_device_from_address`; cover:
-   config flow (discovery→token→validate→entry), coordinator session
-   (success/timeout/locked), service handlers, entity values.
+2. **Integration unit tests** (as built 2026-11-02):
+   `pytest-homeassistant-custom-component` (0.13.372, HA 2026.10.1).
+   Pattern follows the `hello_fairy_ble` integration's suite ("only radio
+   I/O is simulated"):
+   - `tests/ha/fake_feeder.py` — a `FakeFeeder` implementing the
+     bleak-client surface the asf02 library drives (`connect`,
+     `disconnect`, `start_notify`, `write_gatt_char`). It speaks the real
+     wire protocol (compact JSON-RPC frames, response on the notify char,
+     async delivery) and reproduces the device behaviors that matter:
+     re-lock on every reconnect, `-31400` locked errors, the
+     non-JSON `feeder.plan` read frame, silent `feeder.log`, configurable
+     feed auto-completion for `wait=True`.
+   - The real `ASF02Client` runs unmodified (post-connect delay patched to
+     0 via a fast wrapper in conftest); the integration's
+     `make_client_factory` seam is monkeypatched to return the fake.
+   - Advertisements are injected through the **real bluetooth manager**
+     (`_get_manager(hass).scanner_adv_received(info)`) with a
+     `BluetoothServiceInfoBleak` built to the feeder's real ad shape —
+     matchers, history, and availability tracking run for real.
+   - Covers: entry setup + entities (4 sensors, 3 binary), ad → gated
+     poll → entities, poll gating (15-min window, feed-in-progress),
+     feed event, wrong-token failure path, all four services, config flow
+     (manual MAC, token, wrong token, generate-and-repair, duplicate,
+     non-connectable discovery), options flow, diagnostics.
 3. **Live acceptance checklist** (spare feeder, then in-use feeder):
    - [ ] discovery flow lists feeder (local dongle)
    - [ ] discovery flow lists feeder (ESPHome proxy only, dongle unplugged)
@@ -451,6 +470,42 @@ One `DeviceInfo` per feeder: `identifiers={(DOMAIN, address)}`,
    - [ ] vendor app connected simultaneously → clean error
 4. **Soak**: 4 feeders, 1 proxy, 15-min poll for 48 h; watch for slot
    exhaustion / BlueZ errors in HA logs.
+
+### 12.5 Reference comparison: `hello_fairy_ble` (reviewed 2026-11-02)
+
+`nzrutman/hello_fairy_ble` is a production HACS integration for the
+Hello Fairy ISSC light (same `49535343-...` service family as the
+user's `issc` work). Reviewed to validate this design:
+
+- **Adopted**: the "only radio I/O is simulated" test pattern
+  (§12.2 above); `diagnostics.py` (cached snapshot, never a new GATT
+  query); CI (ruff + pytest matrix over two plugin versions);
+  `hacs.json`; `pyproject.toml` pytest/ruff config; the
+  `tests/install_dependencies.py` trick (HA component manifest-level
+  requirements like `aiousbwatcher` are installed by HA at runtime, not
+  by pip — the test env must install them).
+- **Not adopted (deliberate)**:
+  - *Persistent connection + GATT notifications.* Their light **pushes**
+    state, so they hold the link and the coordinator's "poll" reads a
+    cache. The feeder **polls** (no notify characteristic in the
+    protocol), so the transient connect→read→disconnect session stays.
+    Holding a BLE slot for a 15-min-cadence read would be wasteful.
+  - *Plain `BleakClient` via `establish_connection`.* They pass the bare
+    client; this integration passes `HaBleakClientWrapper` (slot
+    allocation + adapter/proxy routing). The wrapper is the more
+    HA-native choice; `establish_connection` itself is shared.
+  - *Vendored protocol code (`requirements: []`).* They inline the
+    protocol; this integration keeps `asf02` on PyPI as the single
+    tested source of truth (the `client_factory` seam exists precisely
+    so the integration stays thin). Only reason to vendor would be
+    install-time independence from PyPI — not worth the duplication.
+- **Confirmed** (independent evidence, no change):
+  `async_ble_device_from_address` returns the ad-history `BLEDevice`
+  (their coordinator line 46 uses it exactly that way); the
+  `bluetooth_adapters` manifest dependency is the current core pattern
+  (their manifest matches, as does `specialized_turbo`'s);
+  `OptionsFlow` (not `ConfigEntryOptionsFlow`) provides
+  `self.config_entry`.
 
 ## 13. Sources (verified 2026-09-11; doc re-check 2026-09-18)
 
@@ -479,24 +534,34 @@ One `DeviceInfo` per feeder: `identifiers={(DOMAIN, address)}`,
 - ha-petkit-ble `HOME_ASSISTANT_BLUETOOTH_GUIDE.md` — directionally useful,
   but its `BluetoothClient` example does **not** match current core API;
   treated as historical, not normative.
+- `nzrutman/hello_fairy_ble` (GitHub, reviewed 2026-11-02) — production
+  HACS integration for the Hello Fairy ISSC light; reference for the
+  radio-only-simulated test pattern, diagnostics, and CI (see §12.5).
+- HA 2026.10.1 + `habluetooth` 7.1.2 + `home-assistant-bluetooth` 2.0.0
+  (installed source, 2026-11-02) — `ActiveBluetoothDataUpdateCoordinator`
+  internals (poll failures swallowed in `_async_poll`; per-address
+  advertisement callbacks), `BluetoothServiceInfoBleak` constructor,
+  `manager.scanner_adv_received()` as the ad-injection entry point,
+  `CONF_ENTITY_ID` + `cv.entity_ids` for service entity lists.
 
 ## 14. Implementation plan (task list)
 
-Status (2026-09-30): `asf02` **0.2.1 is live on PyPI** (client_factory seam +
+Status (2026-11-02): `asf02` **0.2.1 is live on PyPI** (client_factory seam +
 verified mid-feed docs). Tasks T2–T5 are implemented on branch
 `integration-v1` (manifest, coordinator on
 `ActiveBluetoothDataUpdateCoordinator`, managed-client seam, config flow +
-options, sensors, binary sensors, services) — pending the T6 test suite and
-live acceptance.
+options, sensors, binary sensors, services) and verified by the T6 suite
+against **HA Core 2026.10.1** (25/25 green, no live hardware). Remaining:
+live acceptance (T7 → T9).
 
-Task states: ✅ done · ⬜ open · T6 next, then T7 → T9.
+Task states: ✅ done · ⬜ open · T7 next, then T8 → T9.
 
 ### T1 — Release `asf02` 0.2.x to PyPI (asf02 repo) — ✅ 0.2.1 published
 - ✅ `client_factory` seam merged (PR #4) and released; user published **0.2.1**
   to PyPI (verified: `client_factory` param present on `ASF02Client.__init__`).
 - *Acceptance (met)*: `asf02 0.2.1` live on PyPI.
 
-### T2 — Integration skeleton (asf02-ha repo) — ⬜ implemented, untested
+### T2 — Integration skeleton (asf02-ha repo) — ✅ implemented, T6-verified
 Files: `custom_components/asf02/{__init__.py, manifest.json, const.py, coordinator.py}`
 - ☐ `manifest.json` per §4 exactly (`version: "0.1.0"`, `integration_type: device`, `bluetooth_adapters` dep, `asf02>=0.2,<0.3`)
 - ☐ `const.py`: domain, `CONF_ADDRESS/CONF_TOKEN/CONF_TZ_OFFSET/CONF_NAME`, defaults (15-min poll, 410 battery threshold)
@@ -509,7 +574,7 @@ Files: `custom_components/asf02/{__init__.py, manifest.json, const.py, coordinat
 - ☐ `__init__.py`: entry setup → coordinator → `async_forward_entry_setups`; unload path; `async_track_unavailable` wiring (§6.3)
 - *Acceptance*: loads in HA dev instance; `hass.config_entries` shows entry; coordinator logs clean session (connect→unlock→sync→info→status→schedule→disconnect) against the spare; `hass.config_entries.async_remove` tears down cleanly.
 
-### T3 — Config flow — ⬜ implemented, untested
+### T3 — Config flow — ✅ implemented, T6-verified
 Files: `custom_components/asf02/config_flow.py`
 - ☐ `SOURCE_BLUETOOTH`: manifest matcher (`local_name: ASF02-*`) → device picker step (name, MAC, RSSI, source adapter); reject non-connectable sources with the clear error (§4 note)
 - ☐ `SOURCE_USER`: manual MAC entry
@@ -519,7 +584,7 @@ Files: `custom_components/asf02/config_flow.py`
 - ☐ entry data: `address`, `token`, `tz_offset_seconds` (default from HA config), `name`
 - *Acceptance*: all four paths exercised in a live dev instance — discovery (dongle), manual MAC, existing token, generated-token re-pair; wrong token shows the form error and creates no entry.
 
-### T4 — Entities — ⬜ implemented, untested
+### T4 — Entities — ✅ implemented, T6-verified
 Files: `custom_components/asf02/{sensor.py, binary_sensor.py}`
 - ☐ sensors per §7.1 (battery **no device class**, feed_count `TOTAL_INCREASING`, schedule text + `slots_*` attributes, device_time timestamp); common attributes `firmware`/`serial`/`hw_version`/`fetched_at`/`source`
 - ☐ binary sensors per §7.2 (`feeding` from `status.s`, `battery_low` from `b ≤ 410`, `fed_recently` 10-min window via snapshot comparison in coordinator)
@@ -527,19 +592,52 @@ Files: `custom_components/asf02/{sensor.py, binary_sensor.py}`
 - ☐ `DeviceInfo` per §7.5 (identifiers, connections, via_device best-effort)
 - *Acceptance*: spare feeder shows all entities with sane values; `hass.states.get` matches a manual library session read; event fires on a test feed.
 
-### T5 — Services — ⬜ implemented, untested
+### T5 — Services — ✅ implemented, T6-verified
 Files: `custom_components/asf02/services.yaml` (+ handlers in `__init__.py`)
 - ☐ `asf02_feed` (portions 1..99, `wait` default false — §7.4), `asf02_stop`, `asf02_set_schedule` (full-array replace, `HH:MM` validation, echo-as-confirmation), `asf02_clear_schedule`
 - ☐ each handler: resolve entity_id → coordinator → take the coordinator's session lock (never a parallel GATT session)
 - *Acceptance*: `feed(2)` dispenses 2 portions, counter +2, event fires, non-blocking return < 15 s; `feed(3, wait=true)` returns only after `s==0`; `stop` mid-feed cancels with no counter change (§7.4 verified semantics); schedule set persists (ground truth: vendor app read-back).
 
-### T6 — Unit test suite to green
-Files: `tests/*` (`pytest-homeassistant-custom-component`)
-- ☐ config flow: discovery→token→validate→entry; wrong token; non-connectable source rejection; duplicate entry abort
-- ☐ coordinator: success, `UpdateFailed` (out of range), `ASF02LockedError` → setup error, lock serialization
-- ☐ entities: values + attributes from a fixture snapshot; `fed_recently` window; event firing
-- ☐ services: all four, including `wait` polling loop (fake client that reports `s=1` for 2 polls)
-- *Acceptance*: `pytest tests/` green, no live hardware needed (injected-factory fake `ASF02Client` + faked `async_ble_device_from_address`).
+### T6 — Unit test suite to green — ✅ 25/25 against HA 2026.10.1
+Files: `tests/ha/{conftest.py, fake_feeder.py, test_coordinator.py,
+test_config_flow.py, test_options_flow.py, test_services.py,
+test_diagnostics.py}`, `tests/install_dependencies.py`, `pyproject.toml`,
+`.github/workflows/tests.yaml`, `hacs.json`
+- ✅ config flow: discovery→token→validate→entry; wrong token (device
+  rejection, not format rejection — the test token must be a *valid-shaped*
+  10-char token to exercise that path); non-connectable source rejection;
+  duplicate entry abort; generated-token re-pair
+- ✅ coordinator: entry setup → unavailable entities; ad → real
+  `ActiveBluetoothDataUpdateCoordinator` poll path → entities filled;
+  poll-interval gating; feed-in-progress gating; `UpdateFailed` on bad token
+  (entry survives, previous data kept); feed event on counter increment
+- ✅ services: all four, including `wait` completion polling and bad-portions
+  rejection; non-ASF02 entity rejection
+- ✅ diagnostics: cached snapshot only, never a new GATT session
+- *Pattern*: "only radio I/O is simulated" (see §12.5) — `FakeFeeder`
+  implements the bleak-client surface and speaks the real wire protocol;
+  the asf02 library's framing/matching and all integration code run
+  unmodified. Ads are injected through the real bluetooth manager, so the
+  ad pipeline (matchers, history, availability) is exercised for real.
+- *Acceptance (met)*: `pytest tests/ha` green (25 passed), no live hardware.
+- *Compatibility verified*: both CI matrix legs — plugin 0.13.366 (HA Core
+  **2026.9.3**) and 0.13.372 (HA Core **2026.10.1**) — 25/25 green on each.
+  Manifest carries `min_ha_version: "2026.9.3"` (the verified floor; the
+  drift below predates 2026.10).
+- *HA 2026.9+ API drift found while building T6* (bites any integration
+  written against older cores): `hass.now()` removed (use
+  `dt_util.now(dt_util.get_time_zone(hass.config.time_zone))`); service
+  handlers take only `ServiceCall` (no `hass` param); `State.available`
+  removed (check `state.state == "unavailable"`); entity-registry
+  `reg.platform` is the integration domain, `reg.domain` the platform;
+  `ServiceRegistry.async_register_admin` gone (use `async_register` +
+  `system: true` in services.yaml); flow/service schema violations raise
+  (`InvalidData` / raw `probatio.Invalid`) instead of re-showing with field
+  errors; coordinator polls run as **background** debouncer tasks — tests
+  must `async_block_till_done(wait_background_tasks=True)`; the feeder's
+  0xFFFF-manufacturer ad also matches other core integrations' discovery
+  matchers (e.g. kegtron), so the test conftest suppresses foreign-domain
+  auto-discovery flows.
 
 ### T7 — Live acceptance (§12.3 checklist)
 - ☐ all 9 checklist items against the spare feeder (dongle, then ESPHome proxy only with dongle unplugged)

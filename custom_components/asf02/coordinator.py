@@ -22,13 +22,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from bleak import BleakError
-from asf02 import (
-    ASF02Client,
-    ASF02Error,
-    ASF02LockedError,
-)
-from asf02.protocol import PlanEntry
-
 from homeassistant.components.bluetooth import BluetoothScanningMode
 from homeassistant.components.bluetooth.active_update_coordinator import (
     ActiveBluetoothDataUpdateCoordinator,
@@ -38,13 +31,22 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from asf02 import (
+    ASF02Client,
+    ASF02Error,
+    ASF02LockedError,
+)
+from asf02.protocol import PlanEntry
+
 from .const import (
     BATTERY_LOW_THRESHOLD,
+    DEFAULT_POLL_MINUTES,
     EVENT_FEED,
     FEED_SECONDS_PER_PORTION,
     FEED_WAIT_MARGIN,
     FEED_WAIT_POLL_INTERVAL,
     FEED_WAIT_TIMEOUT,
+    OPTION_POLL_MINUTES,
 )
 from .managed_client import ManagedClientError, make_client_factory
 
@@ -139,9 +141,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         Read live on every ad event so an options change takes effect at the
         next poll without a reload.
         """
-        minutes = self.config_entry.options.get(
-            OPTION_POLL_MINUTES, DEFAULT_POLL_MINUTES
-        )
+        minutes = self.config_entry.options.get(OPTION_POLL_MINUTES, DEFAULT_POLL_MINUTES)
         return float(minutes) * 60.0
 
     # ------------------------------------------------------------------
@@ -163,15 +163,11 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         if seconds_since_last_poll is None:
             # First poll: stagger per-address.
             if self._first_poll_at is None:
-                self._first_poll_at = (
-                    self.hass.loop.time() + _first_poll_stagger(self.address)
-                )
+                self._first_poll_at = self.hass.loop.time() + _first_poll_stagger(self.address)
             return self.hass.loop.time() >= self._first_poll_at
         return seconds_since_last_poll >= self.poll_interval_seconds
 
-    async def _do_poll(
-        self, service_info: BluetoothServiceInfoBleak
-    ) -> FeederSnapshot:
+    async def _do_poll(self, service_info: BluetoothServiceInfoBleak) -> FeederSnapshot:
         async with self._session_lock:
             try:
                 return await self._session_read(service_info)
@@ -187,7 +183,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
                     f"feeder rejected the stored token ({err}); re-configure "
                     "the entry — the 'generate a new token' path re-pairs it"
                 ) from err
-            except (BleakError, ASF02Error, asyncio.TimeoutError) as err:
+            except (TimeoutError, BleakError, ASF02Error) as err:
                 raise UpdateFailed(f"feeder session failed: {err}") from err
 
     # ------------------------------------------------------------------
@@ -207,13 +203,9 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         value = unlock_result.get("t")
         if not isinstance(value, (int, float)):
             return None
-        return datetime.datetime.fromtimestamp(
-            int(value), tz=datetime.timezone.utc
-        ).astimezone()
+        return datetime.datetime.fromtimestamp(int(value), tz=datetime.UTC).astimezone()
 
-    async def _session_read(
-        self, service_info: BluetoothServiceInfoBleak
-    ) -> FeederSnapshot:
+    async def _session_read(self, service_info: BluetoothServiceInfoBleak) -> FeederSnapshot:
         """One full poll: unlock → time sync → info/status/schedule."""
         async with self._session_client() as client:
             unlock_result = await client.unlock()
@@ -235,7 +227,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             uptime_raw=int(status.get("u", 0)),
             schedule=tuple(schedule),
             device_time=self._device_time(unlock_result),
-            fetched_at=self.hass.now(),
+            fetched_at=dt_util.now(dt_util.get_time_zone(self.hass.config.time_zone)),
             source=getattr(service_info, "source", None),
             battery_low=battery_raw <= BATTERY_LOW_THRESHOLD,
         )
@@ -249,9 +241,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             self._last_feed_at = snapshot.fetched_at
             self._fire_feed_event(snapshot.feed_count, snapshot.fetched_at)
 
-    def _fire_feed_event(
-        self, new_count: int, detected_at: datetime.datetime
-    ) -> None:
+    def _fire_feed_event(self, new_count: int, detected_at: datetime.datetime) -> None:
         self.hass.bus.async_fire(
             EVENT_FEED,
             {
@@ -286,12 +276,10 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         prev = self._last_feed_count
         self._last_feed_count = feed_count
         if prev is not None and feed_count > prev:
-            self._last_feed_at = self.hass.now()
+            self._last_feed_at = dt_util.now(dt_util.get_time_zone(self.hass.config.time_zone))
             self._fire_feed_event(feed_count, self._last_feed_at)
 
-    async def _await_completion(
-        self, client: ASF02Client, portions: int, status: dict
-    ) -> dict:
+    async def _await_completion(self, client: ASF02Client, portions: int, status: dict) -> dict:
         """Poll status() until s==0 (mid-feed polling, verified reliable).
 
         Fallback if the link drops mid-feed (observed once pre-2026-09-18,
@@ -306,10 +294,8 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             try:
                 await asyncio.sleep(min(FEED_WAIT_POLL_INTERVAL, remaining))
                 status = await client.status()
-            except (BleakError, ASF02Error, asyncio.TimeoutError):
-                estimated = max(
-                    0.0, portions * FEED_SECONDS_PER_PORTION - FEED_WAIT_POLL_INTERVAL
-                )
+            except TimeoutError, BleakError, ASF02Error:
+                estimated = max(0.0, portions * FEED_SECONDS_PER_PORTION - FEED_WAIT_POLL_INTERVAL)
                 await asyncio.sleep(min(remaining, estimated + FEED_WAIT_MARGIN))
                 async with self._session_client() as retry_client:
                     await retry_client.unlock()
@@ -323,9 +309,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             result = await client.stop()
         return {"ok": bool(result)}
 
-    async def async_set_schedule(
-        self, entries: list[tuple[int, int, int, bool]]
-    ) -> list:
+    async def async_set_schedule(self, entries: list[tuple[int, int, int, bool]]) -> list:
         """Full 10-slot schedule replace; returns the device-confirmed array."""
         async with self._session_lock, self._session_client() as client:
             await client.unlock()

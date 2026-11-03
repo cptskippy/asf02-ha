@@ -16,14 +16,14 @@ import logging
 import re
 
 import voluptuous as vol
-
-from asf02 import ASF02Client, ASF02Error, ASF02LockedError
 from bleak import BleakError
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow, FlowResult
 from homeassistant.helpers import config_validation as cv
+
+from asf02 import ASF02Client, ASF02Error, ASF02LockedError
 
 from .const import (
     CONF_ADDRESS,
@@ -39,9 +39,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9]{10}$")
-_MAC_RE = re.compile(
-    r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$", re.IGNORECASE
-)
+_MAC_RE = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$", re.IGNORECASE)
 
 CONF_TOKEN_FIELD = "token"
 CONF_GENERATE_FIELD = "generate_token"
@@ -83,9 +81,7 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
             return self._async_show_user_form()
         return self._async_show_user_form(errors)
 
-    async def async_step_bluetooth(
-        self, data: BluetoothServiceInfoBleak
-    ) -> FlowResult:
+    async def async_step_bluetooth(self, data: BluetoothServiceInfoBleak) -> FlowResult:
         """Bluetooth discovery (manifest matcher on local_name ASF02-*)."""
         address = data.address.upper()
         self._async_abort_entries_match({address})
@@ -104,9 +100,7 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
     # ------------------------------------------------------------------
     # Token step
     # ------------------------------------------------------------------
-    async def async_step_token(
-        self, user_input: dict | None = None
-    ) -> FlowResult:
+    async def async_step_token(self, user_input: dict | None = None) -> FlowResult:
         """Enter the pairing token (or generate a new one and re-pair)."""
         errors: dict = {}
         if user_input is not None:
@@ -137,9 +131,7 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
     # ------------------------------------------------------------------
     # Validation session
     # ------------------------------------------------------------------
-    async def _validate(
-        self, address: str, token: str, *, generate: bool
-    ) -> None:
+    async def _validate(self, address: str, token: str, *, generate: bool) -> None:
         """One GATT session: unlock, and bind first when re-pairing.
 
         ``bind`` works while locked (verified in live protocol captures),
@@ -172,7 +164,7 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
     # ------------------------------------------------------------------
     # Forms
     # ------------------------------------------------------------------
-    def _async_show_user_form(self) -> FlowResult:
+    def _async_show_user_form(self, errors: dict | None = None) -> FlowResult:
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
@@ -180,6 +172,7 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_ADDRESS, default=""): cv.string,
                 }
             ),
+            errors=errors,
         )
 
     def _async_show_token_form(self, errors: dict) -> FlowResult:
@@ -216,14 +209,10 @@ class ASF02OptionsFlow(OptionsFlow):
     coordinator reads ``poll_minutes`` live, so no reload is needed.
     """
 
-    async def async_step_init(
-        self, user_input: dict | None = None
-    ) -> FlowResult:
+    async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         if user_input is not None:
             return self.async_create_entry(data=user_input)
-        current = self.config_entry.options.get(
-            OPTION_POLL_MINUTES, DEFAULT_POLL_MINUTES
-        )
+        current = self.config_entry.options.get(OPTION_POLL_MINUTES, DEFAULT_POLL_MINUTES)
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(

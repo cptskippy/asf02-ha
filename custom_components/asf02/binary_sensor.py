@@ -5,10 +5,11 @@ from __future__ import annotations
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_ADDRESS, FED_RECENTLY_WINDOW_SECONDS
-from .entity import ASF02ConfigEntry, ASF02CoordinatorEntity
 from .coordinator import ASF02Coordinator
+from .entity import ASF02ConfigEntry, ASF02CoordinatorEntity
 
 
 async def async_setup_entry(
@@ -46,9 +47,7 @@ class ASF02FeedingBinarySensor(ASF02BinarySensor):
     """On while the motor is dispensing (status.s == 1)."""
 
     def __init__(self, coordinator: ASF02Coordinator, entry: ASF02ConfigEntry) -> None:
-        super().__init__(
-            coordinator, entry, translation_key="feeding", unique_key="feeding"
-        )
+        super().__init__(coordinator, entry, translation_key="feeding", unique_key="feeding")
 
     @property
     def is_on(self) -> bool | None:
@@ -87,5 +86,7 @@ class ASF02FedRecentlyBinarySensor(ASF02BinarySensor):
         last_feed_at = self.coordinator.last_feed_at
         if last_feed_at is None:
             return False
-        age = (self.hass.now() - last_feed_at).total_seconds()
+        age = (
+            dt_util.now(dt_util.get_time_zone(self.hass.config.time_zone)) - last_feed_at
+        ).total_seconds()
         return 0 <= age <= FED_RECENTLY_WINDOW_SECONDS

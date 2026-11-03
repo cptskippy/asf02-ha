@@ -3,6 +3,7 @@
 from homeassistant.const import Platform
 
 DOMAIN = "asf02"
+VERSION = "0.1.0"
 
 CONF_ADDRESS = "address"
 CONF_TOKEN = "token"

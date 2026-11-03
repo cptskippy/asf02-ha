@@ -23,8 +23,7 @@ def _fmt_schedule(snapshot) -> tuple[str, dict[str, Any]]:
     if not entries:
         return "—", {}
     human = " · ".join(
-        f"{e.hour:02d}:{e.minute:02d} ×{e.portion}"
-        + ("" if e.enabled else " (off)")
+        f"{e.hour:02d}:{e.minute:02d} ×{e.portion}" + ("" if e.enabled else " (off)")
         for e in entries
     )
     return human, {"entry_count": len(entries)}
@@ -36,7 +35,6 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: ASF02Coordinator = entry.runtime_data
-    address = entry.data[CONF_ADDRESS]
     async_add_entities(
         [
             ASF02BatterySensor(coordinator, entry),
@@ -80,9 +78,7 @@ class ASF02BatterySensor(ASF02Sensor):
     """
 
     def __init__(self, coordinator: ASF02Coordinator, entry: ASF02ConfigEntry) -> None:
-        super().__init__(
-            coordinator, entry, translation_key="battery", unique_key="battery"
-        )
+        super().__init__(coordinator, entry, translation_key="battery", unique_key="battery")
 
     @property
     def native_value(self) -> int | None:
@@ -93,9 +89,7 @@ class ASF02FeedCountSensor(ASF02Sensor):
     """Total portions dispensed (live-incrementing, monotonically increasing)."""
 
     def __init__(self, coordinator: ASF02Coordinator, entry: ASF02ConfigEntry) -> None:
-        super().__init__(
-            coordinator, entry, translation_key="feed_count", unique_key="feed_count"
-        )
+        super().__init__(coordinator, entry, translation_key="feed_count", unique_key="feed_count")
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_native_unit_of_measurement = "portions"
 
@@ -109,9 +103,7 @@ class ASF02FeedCountSensor(ASF02Sensor):
         return {
             "feed_count_mirror": self.snapshot.feed_count_mirror,
             "last_feed_at": (
-                self.coordinator.last_feed_at.isoformat()
-                if self.coordinator.last_feed_at
-                else None
+                self.coordinator.last_feed_at.isoformat() if self.coordinator.last_feed_at else None
             ),
         }
 
@@ -120,9 +112,7 @@ class ASF02ScheduleSensor(ASF02Sensor):
     """The 10-slot schedule as a human string; slots in attributes."""
 
     def __init__(self, coordinator: ASF02Coordinator, entry: ASF02ConfigEntry) -> None:
-        super().__init__(
-            coordinator, entry, translation_key="schedule", unique_key="schedule"
-        )
+        super().__init__(coordinator, entry, translation_key="schedule", unique_key="schedule")
 
     @property
     def native_value(self) -> str | None:
