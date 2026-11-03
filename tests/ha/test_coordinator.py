@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.asf02 import const
@@ -124,7 +125,15 @@ async def test_feed_event_fires_on_counter_increment(hass, entry, patched_client
     coordinator = await _setup(hass, entry, patched_client)
 
     events: list = []
-    hass.bus.async_listen(const.EVENT_FEED, lambda e: events.append(e))
+
+    # @callback, not a bare lambda: a non-callback listener is dispatched
+    # through the executor pool, so its delivery would race the assert
+    # below (flaked on CI). Callbacks run inline in async_fire.
+    @callback
+    def _on_feed(event) -> None:
+        events.append(event)
+
+    hass.bus.async_listen(const.EVENT_FEED, _on_feed)
 
     info = fire_advertisement(hass)
     await hass.async_block_till_done(wait_background_tasks=True)
