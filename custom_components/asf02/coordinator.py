@@ -114,6 +114,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         self._first_poll_at: float | None = None
         self._shutdown_requested = False
         self._feed_in_progress = False
+        self._last_ad_log_at: float | None = None
 
     @property
     def last_feed_at(self) -> datetime.datetime | None:
@@ -158,12 +159,41 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         Skips polls while a service-call feed is in progress: the feeder is
         single-connection, and the service session already tracks progress.
         """
+        result = self._compute_needs_poll(service_info, seconds_since_last_poll)
+        # Throttled diagnostic (once per 30 s): confirm ad events reach the
+        # coordinator and show the gating decision. Absence of these lines
+        # means ads are not arriving; presence with will_poll=False means the
+        # gate is holding; will_poll=True with no matching "poll attempt"
+        # means the debounced poll never ran.
+        now = self.hass.loop.time()
+        if self._last_ad_log_at is None or now - self._last_ad_log_at >= 30.0:
+            self._last_ad_log_at = now
+            _LOGGER.debug(
+                "%s: ad event (source=%s, poll_age=%s, will_poll=%s)",
+                self.address,
+                getattr(service_info, "source", None),
+                (
+                    f"{seconds_since_last_poll:.1f}s"
+                    if seconds_since_last_poll is not None
+                    else "first"
+                ),
+                result,
+            )
+        return result
+
+    def _compute_needs_poll(
+        self,
+        service_info: BluetoothServiceInfoBleak,
+        seconds_since_last_poll: float | None,
+    ) -> bool:
         if self._shutdown_requested or self._feed_in_progress:
             return False
         if seconds_since_last_poll is None:
             # First poll: stagger per-address.
             if self._first_poll_at is None:
-                self._first_poll_at = self.hass.loop.time() + _first_poll_stagger(self.address)
+                self._first_poll_at = self.hass.loop.time() + _first_poll_stagger(
+                    self.address
+                )
             return self.hass.loop.time() >= self._first_poll_at
         return seconds_since_last_poll >= self.poll_interval_seconds
 
