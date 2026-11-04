@@ -168,11 +168,17 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         return seconds_since_last_poll >= self.poll_interval_seconds
 
     async def _do_poll(self, service_info: BluetoothServiceInfoBleak) -> FeederSnapshot:
+        source = getattr(service_info, "source", None)
+        _LOGGER.debug("%s: poll attempt starting (source=%s)", self.address, source)
         async with self._session_lock:
             try:
-                return await self._session_read(service_info)
+                snapshot = await self._session_read(service_info)
+                _LOGGER.debug("%s: poll succeeded (source=%s)", self.address, source)
+                return snapshot
             except ManagedClientError as err:
-                raise UpdateFailed(f"no connectable Bluetooth path: {err}") from err
+                raise UpdateFailed(
+                    f"no connectable Bluetooth path via {source}: {err}"
+                ) from err
             except ASF02LockedError as err:
                 # Token problem (e.g. device rebound via the vendor app).
                 # The base poll path swallows ConfigEntryError, so this
@@ -180,11 +186,16 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
                 # in the message; re-configuring the entry (generated-token
                 # path) re-pairs the feeder.
                 raise UpdateFailed(
-                    f"feeder rejected the stored token ({err}); re-configure "
-                    "the entry — the 'generate a new token' path re-pairs it"
+                    f"feeder rejected the stored token via {source} ({err}); "
+                    "re-configure the entry — the 'generate a new token' path re-pairs it"
                 ) from err
             except (TimeoutError, BleakError, ASF02Error) as err:
-                raise UpdateFailed(f"feeder session failed: {err}") from err
+                _LOGGER.debug(
+                    "%s: poll session error (source=%s): %s", self.address, source, err
+                )
+                raise UpdateFailed(
+                    f"feeder session failed via {source}: {err}"
+                ) from err
 
     # ------------------------------------------------------------------
     # Sessions
