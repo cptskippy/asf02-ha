@@ -53,7 +53,7 @@ from .managed_client import ManagedClientError, make_client_factory
 _LOGGER = logging.getLogger(__name__)
 
 # Default poll interval: 15 minutes (see const.OPTION_POLL_MINUTES /
-# coordinator.poll_interval_seconds; options-adjustable 5 min – 1 h). A
+# coordinator.poll_interval_seconds; options-adjustable 1 min – 1 h). A
 # session is ~10 s of GATT, so per feeder that is well under 10% slot
 # duty-cycle.
 # Stagger each feeder's first poll so several feeders don't all connect at
@@ -136,7 +136,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
 
     @property
     def poll_interval_seconds(self) -> float:
-        """Poll cadence from the options flow (5 min – 1 h, default 15 min).
+        """Poll cadence from the options flow (1 min – 1 h, default 15 min).
 
         Read live on every ad event so an options change takes effect at the
         next poll without a reload.

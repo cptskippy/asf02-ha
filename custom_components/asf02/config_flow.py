@@ -22,6 +22,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow, FlowResult
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import selector
 
 from asf02 import ASF02Client, ASF02Error, ASF02LockedError
 
@@ -203,7 +204,7 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class ASF02OptionsFlow(OptionsFlow):
-    """Options: poll interval (5 min – 1 h).
+    """Options: poll interval (1 min – 1 h).
 
     ``self.config_entry`` comes from the base class (handler-scoped); the
     coordinator reads ``poll_minutes`` live, so no reload is needed.
@@ -217,9 +218,14 @@ class ASF02OptionsFlow(OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(OPTION_POLL_MINUTES, default=current): vol.All(
-                        cv.positive_int,
-                        vol.Range(min=MIN_POLL_MINUTES, max=MAX_POLL_MINUTES),
+                    vol.Required(OPTION_POLL_MINUTES, default=current): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=MIN_POLL_MINUTES,
+                            max=MAX_POLL_MINUTES,
+                            step=1,
+                            unit_of_measurement="min",
+                            mode=selector.NumberSelectorMode.SLIDER,
+                        )
                     ),
                 }
             ),
