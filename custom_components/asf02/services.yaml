@@ -43,35 +43,16 @@ set_schedule:
   description: >-
     Replace the entire 10-slot schedule. The write response (the
     device-confirmed slot array) is the authoritative confirmation.
+    Requires `entries`: a list of up to 10 objects, each with `time`
+    ("HH:MM"), `portion` (1-9), and optional `enabled` (bool). This field
+    is best supplied from a script or automation, e.g.
+    entries: [{time: "08:00", portion: 2}, {time: "18:00", portion: 1}].
   fields:
     entity_id:
       required: true
       selector:
         entity:
           integration: asf02
-    entries:
-      required: true
-      selector:
-        repeat:
-          max: 10
-          fields:
-            time:
-              required: true
-              selector:
-                time:
-            portion:
-              required: true
-              selector:
-                number:
-                  min: 1
-                  max: 9
-                  mode: box
-                  step: 1
-            enabled:
-              required: false
-              default: true
-              selector:
-                boolean:
 clear_schedule:
   system: true
   is_advanced: true

@@ -76,6 +76,7 @@
     "step": {
       "init": {
         "title": "ASF02 Options",
+        "description": "Lower intervals update the sensors faster but increase Bluetooth airtime and battery drain on the feeder. Use 1-minute intervals for debugging only.",
         "data": {
           "poll_minutes": "Poll interval (minutes)"
         }

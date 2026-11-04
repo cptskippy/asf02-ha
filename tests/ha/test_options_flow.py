@@ -1,4 +1,4 @@
-"""Options flow: poll interval (5 min – 1 h), read live by the coordinator."""
+"""Options flow: poll interval (1 min – 1 h), read live by the coordinator."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ async def test_options_rejects_out_of_range(hass, entry, patched_client):
     # validation raises before the step ever sees the data).
     with pytest.raises(InvalidData, match="poll_minutes"):
         await hass.config_entries.options.async_configure(
-            result["flow_id"], {const.OPTION_POLL_MINUTES: 2}
+            result["flow_id"], {const.OPTION_POLL_MINUTES: 0}
         )
     with pytest.raises(InvalidData, match="poll_minutes"):
         await hass.config_entries.options.async_configure(

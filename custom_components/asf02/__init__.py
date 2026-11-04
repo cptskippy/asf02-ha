@@ -44,7 +44,7 @@ SCHEDULE_ENTRY_SCHEMA = vol.Schema(
     }
 )
 
-ENTITY_IDS_SCHEMA = {CONF_ENTITY_ID: cv.entity_ids}
+ENTITY_IDS_SCHEMA = {vol.Required(CONF_ENTITY_ID): cv.entity_ids}
 
 SERVICE_FEED_SCHEMA = vol.Schema(
     {
