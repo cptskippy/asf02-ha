@@ -191,9 +191,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         if seconds_since_last_poll is None:
             # First poll: stagger per-address.
             if self._first_poll_at is None:
-                self._first_poll_at = self.hass.loop.time() + _first_poll_stagger(
-                    self.address
-                )
+                self._first_poll_at = self.hass.loop.time() + _first_poll_stagger(self.address)
             return self.hass.loop.time() >= self._first_poll_at
         return seconds_since_last_poll >= self.poll_interval_seconds
 
@@ -206,9 +204,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
                 _LOGGER.debug("%s: poll succeeded (source=%s)", self.address, source)
                 return snapshot
             except ManagedClientError as err:
-                raise UpdateFailed(
-                    f"no connectable Bluetooth path via {source}: {err}"
-                ) from err
+                raise UpdateFailed(f"no connectable Bluetooth path via {source}: {err}") from err
             except ASF02LockedError as err:
                 # Token problem (e.g. device rebound via the vendor app).
                 # The base poll path swallows ConfigEntryError, so this
@@ -220,12 +216,8 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
                     "re-configure the entry — the 'generate a new token' path re-pairs it"
                 ) from err
             except (TimeoutError, BleakError, ASF02Error) as err:
-                _LOGGER.debug(
-                    "%s: poll session error (source=%s): %s", self.address, source, err
-                )
-                raise UpdateFailed(
-                    f"feeder session failed via {source}: {err}"
-                ) from err
+                _LOGGER.debug("%s: poll session error (source=%s): %s", self.address, source, err)
+                raise UpdateFailed(f"feeder session failed via {source}: {err}") from err
 
     # ------------------------------------------------------------------
     # Sessions
