@@ -9,7 +9,7 @@ from homeassistant.helpers import entity_registry as er
 from custom_components.asf02 import const
 from custom_components.asf02.coordinator import ASF02Coordinator
 
-from .conftest import ADDRESS, fire_advertisement
+from .conftest import ADDRESS, fire_advertisement, poll_once
 
 
 async def _setup(hass, entry, patched_client) -> ASF02Coordinator:
@@ -51,11 +51,13 @@ async def test_entry_setup_creates_entities_unavailable(hass, entry, patched_cli
     assert coordinator.data is None
 
 
-async def test_ad_triggers_poll_and_fills_entities(hass, entry, patched_client, fake_state):
+async def test_poll_fills_entities(hass, entry, patched_client, fake_state):
     coordinator = await _setup(hass, entry, patched_client)
 
+    # Ad marks availability and gives the coordinator a device; the timer
+    # then drives the actual poll.
     fire_advertisement(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll_once(hass, coordinator)
 
     assert coordinator.available
     snap = coordinator.data
@@ -83,28 +85,25 @@ async def test_ad_triggers_poll_and_fills_entities(hass, entry, patched_client, 
 
 
 async def test_battery_low_binary(hass, entry, patched_client, fake_state):
-    await _setup(hass, entry, patched_client)
+    coordinator = await _setup(hass, entry, patched_client)
     fake_state.battery_raw = const.BATTERY_LOW_THRESHOLD - 10
 
     fire_advertisement(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll_once(hass, coordinator)
 
     entities = _entities_by_key(hass, entry)
     assert hass.states.get(entities["battery_low"]).state == "on"
 
 
-async def test_second_ad_within_poll_interval_does_not_poll(
-    hass, entry, patched_client, fake_state
-):
-    await _setup(hass, entry, patched_client)
+async def test_timer_does_not_poll_within_interval(hass, entry, patched_client, fake_state):
+    coordinator = await _setup(hass, entry, patched_client)
 
     fire_advertisement(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll_once(hass, coordinator)
     assert fake_state.connect_count == 1
 
-    # A repeat ad seconds later is not due for a poll.
-    fire_advertisement(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    # A further timer tick within the interval is not due for a poll.
+    await poll_once(hass, coordinator)
     assert fake_state.connect_count == 1
 
 
@@ -112,12 +111,13 @@ async def test_feed_in_progress_blocks_polls(hass, entry, patched_client, fake_s
     coordinator = await _setup(hass, entry, patched_client)
 
     fire_advertisement(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll_once(hass, coordinator)
     assert fake_state.connect_count == 1
 
+    # A feed in progress blocks the timer-driven poll.
     coordinator._feed_in_progress = True
-    fire_advertisement(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    coordinator._last_poll = None
+    await poll_once(hass, coordinator)
     assert fake_state.connect_count == 1
 
 
@@ -135,18 +135,18 @@ async def test_feed_event_fires_on_counter_increment(hass, entry, patched_client
 
     hass.bus.async_listen(const.EVENT_FEED, _on_feed)
 
-    info = fire_advertisement(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    fire_advertisement(hass)
+    await poll_once(hass, coordinator)
     assert fake_state.connect_count == 1
 
     # Counter moves between two direct session reads → event.
     fake_state.feed_count = 5
-    await coordinator._do_poll(info)
+    await coordinator._do_poll(coordinator._last_service_info)
     assert [e.data["new_count"] for e in events] == [5]
     assert events[0].data["address"] == ADDRESS
 
     fake_state.feed_count = 7
-    await coordinator._do_poll(info)
+    await coordinator._do_poll(coordinator._last_service_info)
     assert [e.data["new_count"] for e in events] == [5, 7]
 
 
@@ -163,15 +163,15 @@ async def test_do_poll_wrong_token_raises_update_failed(hass, entry, patched_cli
 
 
 async def test_failed_poll_keeps_previous_data(hass, entry, patched_client):
-    """The active base's poll path swallows failures instead of crashing.
+    """The poll path swallows failures instead of crashing.
 
     A bad token must not take the entry down: previous data is kept, the
-    failure is logged, and the next ad retries the poll.
+    failure is logged, and the next poll retries.
     """
     coordinator = await _setup(hass, entry, patched_client)
 
     fire_advertisement(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll_once(hass, coordinator)
     before = coordinator.data
     assert before is not None
     assert coordinator.last_poll_successful is True

@@ -159,7 +159,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         return float(minutes) * 60.0
 
     # ------------------------------------------------------------------
-    # Poll gating
+    # Ad handling (availability only — the timer drives the poll)
     # ------------------------------------------------------------------
     @callback
     def _needs_poll(
@@ -167,46 +167,23 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         service_info: BluetoothServiceInfoBleak,
         seconds_since_last_poll: float | None,
     ) -> bool:
-        """Poll when due (15 min) and not mid-feed.
+        """Ad events never schedule a poll — the timer is the sole trigger.
 
-        Skips polls while a service-call feed is in progress: the feeder is
-        single-connection, and the service session already tracks progress.
+        Returning False stops the base class from firing the debounced poll
+        on an advertisement. The ad's only jobs here are marking the device
+        available and storing its BLEDevice (handled by the base before this
+        is called), which the timer then uses to connect. A throttled
+        diagnostic confirms ads are still reaching the coordinator.
         """
-        result = self._compute_needs_poll(service_info, seconds_since_last_poll)
-        # Throttled diagnostic (once per 30 s): confirm ad events reach the
-        # coordinator and show the gating decision. Absence of these lines
-        # means ads are not arriving; presence with will_poll=False means the
-        # gate is holding; will_poll=True with no matching "poll attempt"
-        # means the debounced poll never ran.
         now = self.hass.loop.time()
         if self._last_ad_log_at is None or now - self._last_ad_log_at >= 30.0:
             self._last_ad_log_at = now
             _LOGGER.debug(
-                "%s: ad event (source=%s, poll_age=%s, will_poll=%s)",
+                "%s: ad received (source=%s); availability only, poll is timer-driven",
                 self.address,
                 getattr(service_info, "source", None),
-                (
-                    f"{seconds_since_last_poll:.1f}s"
-                    if seconds_since_last_poll is not None
-                    else "first"
-                ),
-                result,
             )
-        return result
-
-    def _compute_needs_poll(
-        self,
-        service_info: BluetoothServiceInfoBleak,
-        seconds_since_last_poll: float | None,
-    ) -> bool:
-        if self._shutdown_requested or self._feed_in_progress:
-            return False
-        if seconds_since_last_poll is None:
-            # First poll: stagger per-address.
-            if self._first_poll_at is None:
-                self._first_poll_at = self.hass.loop.time() + _first_poll_stagger(self.address)
-            return self.hass.loop.time() >= self._first_poll_at
-        return seconds_since_last_poll >= self.poll_interval_seconds
+        return False
 
     async def _do_poll(self, service_info: BluetoothServiceInfoBleak) -> FeederSnapshot:
         source = getattr(service_info, "source", None)
@@ -385,22 +362,32 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         )
 
     @callback
-    def _interval_poll_check(self) -> None:
-        """Timer-driven poll: schedule when the interval has elapsed.
+    def _interval_poll_check(self, _utc_now: datetime.datetime) -> None:
+        """Timer-driven poll: the sole poll trigger.
 
-        Independent of advertisement arrival — the device is always in range,
-        so the cadence is the timer's, not the ad stream's. Connects using the
-        last known service info (the BLEDevice).
+        Called by the wall-clock timer (``async_track_time_interval``), which
+        passes the fire time in UTC (unused here; the monotonic clock below is
+        the reference). Independent of advertisement arrival — the device is
+        always in range, so the cadence is the timer's, not the ad stream's.
+        Connects using the last known service info (the BLEDevice, learned
+        from the first ad). The first poll is staggered per-address (protects
+        3-slot proxies); subsequent polls run on the configured interval.
         """
         if self._shutdown_requested or self._feed_in_progress:
             return
         if self._last_service_info is None:
             # No advertisement has been seen yet — nothing to connect to.
             return
-        if self._last_poll is not None:
-            poll_age = self.hass.loop.time() - self._last_poll
-            if poll_age < self.poll_interval_seconds:
+        now = self.hass.loop.time()
+        if self._last_poll is None:
+            # First poll: stagger per-address.
+            if self._first_poll_at is None:
+                self._first_poll_at = now + _first_poll_stagger(self.address)
+            if now < self._first_poll_at:
                 return
+        elif now - self._last_poll < self.poll_interval_seconds:
+            # Not due yet.
+            return
         self._debounced_poll.async_schedule_call()
 
     @callback
