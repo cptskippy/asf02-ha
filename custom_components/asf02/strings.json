@@ -1,5 +1,10 @@
 {
   "config": {
+    "discover": {
+      "bluetooth": {
+        "title": "{name}"
+      }
+    },
     "step": {
       "user": {
         "title": "ASF02 Pet Feeder",
