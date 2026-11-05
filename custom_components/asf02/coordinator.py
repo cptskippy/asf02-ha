@@ -362,14 +362,16 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         )
 
     @callback
-    def _interval_poll_check(self) -> None:
+    def _interval_poll_check(self, _utc_now: datetime.datetime) -> None:
         """Timer-driven poll: the sole poll trigger.
 
-        Independent of advertisement arrival — the device is always in range,
-        so the cadence is the timer's, not the ad stream's. Connects using the
-        last known service info (the BLEDevice, learned from the first ad).
-        The first poll is staggered per-address (protects 3-slot proxies);
-        subsequent polls run on the configured interval.
+        Called by the wall-clock timer (``async_track_time_interval``), which
+        passes the fire time in UTC (unused here; the monotonic clock below is
+        the reference). Independent of advertisement arrival — the device is
+        always in range, so the cadence is the timer's, not the ad stream's.
+        Connects using the last known service info (the BLEDevice, learned
+        from the first ad). The first poll is staggered per-address (protects
+        3-slot proxies); subsequent polls run on the configured interval.
         """
         if self._shutdown_requested or self._feed_in_progress:
             return

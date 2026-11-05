@@ -167,14 +167,14 @@ def fire_advertisement(
 
 
 async def poll_once(hass, coordinator) -> None:
-    """Drive one poll through the wall-clock timer (the sole poll trigger).
+    """Invoke the wall-clock timer callback directly and await any resulting poll.
 
-    Resets the last-poll bookkeeping so the interval check passes, then
-    invokes the timer callback directly (no 60 s wait) and awaits the
-    debounced GATT session. The feeder must have seen at least one ad first
-    so the coordinator has a device to connect to.
+    Does NOT reset poll bookkeeping — the interval check decides whether a
+    poll runs. Tests that need to force a poll should reset ``_last_poll`` /
+    ``_first_poll_at`` themselves first. The feeder must have seen at least
+    one ad so the coordinator has a device to connect to.
     """
-    coordinator._last_poll = None
-    coordinator._first_poll_at = None
-    coordinator._interval_poll_check()
+    import datetime as _dt
+
+    coordinator._interval_poll_check(_dt.datetime.now(_dt.UTC))
     await hass.async_block_till_done(wait_background_tasks=True)

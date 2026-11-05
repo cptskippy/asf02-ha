@@ -103,8 +103,7 @@ async def test_timer_does_not_poll_within_interval(hass, entry, patched_client, 
     assert fake_state.connect_count == 1
 
     # A further timer tick within the interval is not due for a poll.
-    coordinator._interval_poll_check()
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll_once(hass, coordinator)
     assert fake_state.connect_count == 1
 
 
@@ -118,8 +117,7 @@ async def test_feed_in_progress_blocks_polls(hass, entry, patched_client, fake_s
     # A feed in progress blocks the timer-driven poll.
     coordinator._feed_in_progress = True
     coordinator._last_poll = None
-    coordinator._interval_poll_check()
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll_once(hass, coordinator)
     assert fake_state.connect_count == 1
 
 
