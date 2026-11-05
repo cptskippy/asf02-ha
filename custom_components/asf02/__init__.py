@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from asf02 import ASF02Error
 
@@ -31,6 +32,7 @@ SERVICE_FEED = "feed"
 SERVICE_STOP = "stop"
 SERVICE_SET_SCHEDULE = "set_schedule"
 SERVICE_CLEAR_SCHEDULE = "clear_schedule"
+SERVICE_REFRESH = "refresh"
 
 CONF_PORTIONS = "portions"
 CONF_WAIT = "wait"
@@ -61,6 +63,7 @@ SERVICE_SET_SCHEDULE_SCHEMA = vol.Schema(
     }
 )
 SERVICE_CLEAR_SCHEDULE_SCHEMA = vol.Schema(ENTITY_IDS_SCHEMA)
+SERVICE_REFRESH_SCHEMA = vol.Schema(ENTITY_IDS_SCHEMA)
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
@@ -172,6 +175,18 @@ async def _async_clear_schedule(service: ServiceCall) -> None:
             raise HomeAssistantError(f"clear_schedule failed: {err}") from err
 
 
+async def _async_refresh(service: ServiceCall) -> None:
+    """Poll the feeder now (bypass the timer) and update its entities."""
+    for entity_id in service.data[CONF_ENTITY_ID]:
+        coordinator = _coordinator_for(service, entity_id)
+        try:
+            await coordinator.async_refresh_now()
+        except UpdateFailed as err:
+            raise HomeAssistantError(f"refresh failed: {err}") from err
+        except (BleakError, ASF02Error, TimeoutError) as err:
+            raise HomeAssistantError(f"refresh failed: {err}") from err
+
+
 def _register_services(hass: HomeAssistant) -> None:
     """Register the ASF02 services.
 
@@ -186,4 +201,7 @@ def _register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_CLEAR_SCHEDULE, _async_clear_schedule, schema=SERVICE_CLEAR_SCHEDULE_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_REFRESH, _async_refresh, schema=SERVICE_REFRESH_SCHEMA
     )

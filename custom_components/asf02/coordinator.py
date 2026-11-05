@@ -390,6 +390,25 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             return
         self._debounced_poll.async_schedule_call()
 
+    async def async_refresh_now(self) -> None:
+        """Trigger a poll immediately (e.g. via the refresh service).
+
+        Awaits the GATT session (serialized through ``session_lock``),
+        updates the cached snapshot and listeners, and raises
+        ``UpdateFailed`` on failure so the caller can surface it. Bypasses
+        the timer and the debouncer's exception-swallowing on purpose: a
+        user-pressed refresh should block until the feeder answers and tell
+        the user if it didn't.
+        """
+        if self._feed_in_progress:
+            raise UpdateFailed("feeder is mid-feed; try again once it finishes")
+        if self._last_service_info is None:
+            raise UpdateFailed("no advertisement seen yet — nothing to connect to; wait for one")
+        snapshot = await self._do_poll(self._last_service_info)
+        self.data = snapshot
+        self._last_poll = self.hass.loop.time()
+        self._async_handle_bluetooth_poll()
+
     @callback
     def async_mark_shutdown(self) -> None:
         """Stop scheduling new polls (called from entry unload)."""

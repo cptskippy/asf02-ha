@@ -63,3 +63,15 @@ clear_schedule:
       selector:
         entity:
           integration: asf02
+refresh:
+  system: true
+  description: >-
+    Poll the feeder now (bypass the interval timer) and update its
+    entities. Blocks until the feeder answers. Useful as a dashboard
+    button after a reboot or whenever you want fresh data immediately.
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: asf02
