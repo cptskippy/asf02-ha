@@ -44,6 +44,7 @@ _MAC_RE = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$", re.IGNORECASE)
 
 CONF_TOKEN_FIELD = "token"
 CONF_GENERATE_FIELD = "generate_token"
+CONF_CHANGE_TOKEN_FIELD = "change_token"
 
 
 class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -99,8 +100,10 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
         self._address = address
         self._discovered_name = data.name
         # Per-device discovered-card title so the cards are distinguishable.
+        # The subtitle already carries the integration name, so the title
+        # uses the compact "ASF02-<last six MAC digits>" device-name format.
         mac_tail = address.replace(":", "")[-6:]
-        self.context["title_placeholders"] = {"name": f"ASF02 Pet Feeder {mac_tail}"}
+        self.context["title_placeholders"] = {"name": f"ASF02-{mac_tail}"}
         return await self.async_step_token()
 
     # ------------------------------------------------------------------
@@ -138,23 +141,8 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
     # Validation session
     # ------------------------------------------------------------------
     async def _validate(self, address: str, token: str, *, generate: bool) -> None:
-        """One GATT session: unlock, and bind first when re-pairing.
-
-        ``bind`` works while locked (verified in live protocol captures),
-        so the recovery path needs no prior knowledge of the old token.
-        """
-        from .managed_client import make_client_factory
-
-        tz_offset = _current_tz_offset(self.hass)
-        client = ASF02Client(
-            address,
-            token,
-            client_factory=make_client_factory(self.hass, address, address),
-        )
-        async with client:
-            if generate:
-                await client.bind(token, tz_offset_seconds=tz_offset)
-            await client.unlock()
+        """One GATT session: unlock, and bind first when re-pairing."""
+        await _validate_token(self.hass, address, token, generate=generate)
 
     def _async_finish_entry(self, token: str) -> FlowResult:
         name = self._discovered_name or f"ASF02 {self._address[-5:]}"
@@ -209,18 +197,29 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class ASF02OptionsFlow(OptionsFlow):
-    """Options: poll interval (1 min – 1 h).
+    """Options: poll interval (1 min – 1 h) + pairing-token management.
 
-    ``self.config_entry`` comes from the base class (handler-scoped); the
-    coordinator reads ``poll_minutes`` live, so no reload is needed.
+    The current token is shown read-only for backup, and a "change token"
+    path re-pairs the feeder in place (generate new / enter existing) — the
+    same GATT validation the add flow uses, so HA stays intact.
     """
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            new_options = {OPTION_POLL_MINUTES: user_input[OPTION_POLL_MINUTES]}
+            if user_input.get(CONF_CHANGE_TOKEN_FIELD):
+                # Persist the poll interval, then go to the token step.
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    options={**self.config_entry.options, **new_options},
+                )
+                return await self.async_step_token()
+            return self.async_create_entry(data=new_options)
         current = self.config_entry.options.get(OPTION_POLL_MINUTES, DEFAULT_POLL_MINUTES)
+        token = self.config_entry.data.get(CONF_TOKEN, "")
         return self.async_show_form(
             step_id="init",
+            description_placeholders={"token": token},
             data_schema=vol.Schema(
                 {
                     vol.Required(OPTION_POLL_MINUTES, default=current): selector.NumberSelector(
@@ -232,8 +231,53 @@ class ASF02OptionsFlow(OptionsFlow):
                             mode=selector.NumberSelectorMode.SLIDER,
                         )
                     ),
+                    vol.Optional(CONF_CHANGE_TOKEN_FIELD, default=False): cv.boolean,
                 }
             ),
+        )
+
+    async def async_step_token(self, user_input: dict | None = None) -> FlowResult:
+        """Change the pairing token (generate new / enter existing)."""
+        errors: dict = {}
+        if user_input is not None:
+            generate = user_input[CONF_GENERATE_FIELD]
+            token: str = ""
+            if generate:
+                token = ASF02Client.new_token()
+            else:
+                token = (user_input.get(CONF_TOKEN_FIELD) or "").strip()
+                if not _TOKEN_RE.match(token):
+                    errors[CONF_TOKEN_FIELD] = "invalid_token"
+            if not errors:
+                address = self.config_entry.data[CONF_ADDRESS]
+                try:
+                    await _validate_token(self.hass, address, token, generate=generate)
+                except ASF02LockedError:
+                    errors["base"] = "invalid_token"
+                except (BleakError, ASF02Error, TimeoutError) as err:
+                    _LOGGER.debug("ASF02 token-change session failed: %s", err)
+                    errors["base"] = "cannot_connect"
+                else:
+                    # Update the entry in place (reload picks up the new token).
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry,
+                        data={**self.config_entry.data, CONF_TOKEN: token},
+                    )
+                    # Preserve the existing options (this step only changed the token).
+                    return self.async_create_entry(data=dict(self.config_entry.options))
+        return self._async_show_token_form(errors)
+
+    def _async_show_token_form(self, errors: dict) -> FlowResult:
+        """Token form (generate a new token, or enter an existing one)."""
+        return self.async_show_form(
+            step_id="token",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_GENERATE_FIELD, default=False): cv.boolean,
+                    vol.Optional(CONF_TOKEN_FIELD): cv.string,
+                }
+            ),
+            errors=errors,
         )
 
 
@@ -244,3 +288,24 @@ def _current_tz_offset(hass) -> int:
     zone = dt_util.get_time_zone(hass.config.time_zone)
     offset = dt_util.now(zone).utcoffset()
     return int(offset.total_seconds()) if offset else 0
+
+
+async def _validate_token(hass, address: str, token: str, *, generate: bool) -> None:
+    """One GATT session: unlock, and bind first when re-pairing.
+
+    ``bind`` works while locked (verified in live protocol captures), so the
+    recovery path needs no prior knowledge of the old token. Shared by the
+    config flow (add) and the options flow (change token).
+    """
+    from .managed_client import make_client_factory
+
+    tz_offset = _current_tz_offset(hass)
+    client = ASF02Client(
+        address,
+        token,
+        client_factory=make_client_factory(hass, address, address),
+    )
+    async with client:
+        if generate:
+            await client.bind(token, tz_offset_seconds=tz_offset)
+        await client.unlock()

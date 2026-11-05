@@ -1,5 +1,10 @@
 {
   "config": {
+    "discover": {
+      "bluetooth": {
+        "title": "{name}"
+      }
+    },
     "step": {
       "user": {
         "title": "ASF02 Pet Feeder",
@@ -76,11 +81,24 @@
     "step": {
       "init": {
         "title": "ASF02 Options",
-        "description": "Lower intervals update the sensors faster but increase Bluetooth airtime and battery drain on the feeder. Use 1-minute intervals for debugging only.",
+        "description": "Current pairing token: **{token}** — back this up, it's the only way to re-pair if you lose access.\n\nLower intervals update the sensors faster but increase Bluetooth airtime and battery drain on the feeder. Use 1-minute intervals for debugging only.",
         "data": {
-          "poll_minutes": "Poll interval (minutes)"
+          "poll_minutes": "Poll interval (minutes)",
+          "change_token": "Change the pairing token (re-pairs the feeder)"
+        }
+      },
+      "token": {
+        "title": "Change pairing token",
+        "description": "Enter the current token, or generate a new one. Generating re-pairs the feeder and the old token stops working.",
+        "data": {
+          "generate_token": "Generate a new token and re-pair the feeder (old token is discarded)",
+          "token": "Pairing token"
         }
       }
+    },
+    "error": {
+      "invalid_token": "That doesn't look like a 10-character token, or the feeder rejected it.",
+      "cannot_connect": "Couldn't reach the feeder over Bluetooth. Check the adapter/proxy and try again."
     }
   },
   "entity": {
