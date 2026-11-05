@@ -88,7 +88,7 @@
     "step": {
       "init": {
         "title": "ASF02 Options",
-        "description": "Current pairing token: **{token}** — back this up, it's the only way to re-pair if you lose access.\n\nLower intervals update the sensors faster but increase Bluetooth airtime and battery drain on the feeder. Use 1-minute intervals for debugging only.",
+        "description": "Current pairing token: **{token}** — the key that grants a client control of the feeder without resetting it. Share it here to let a second client control the feeder concurrently. If it's lost, you're not locked out: generate a new token below to re-pair (this resets the feeder and erases its schedules).\n\nLower intervals update the sensors faster but increase Bluetooth airtime and battery drain on the feeder. Use 1-minute intervals for debugging only.",
         "data": {
           "poll_minutes": "Poll interval (minutes)",
           "change_token": "Change the pairing token (re-pairs the feeder)"
