@@ -1,7 +1,7 @@
 {
   "domain": "asf02",
   "name": "ASF02 Pet Feeder",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "codeowners": ["@cptskippy"],
   "config_flow": true,
   "dependencies": ["bluetooth_adapters"],
