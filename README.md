@@ -56,19 +56,15 @@ a device picker. You can also add it manually by entering its MAC address.
 
 ## Setup
 
-Two pieces of information are needed:
+The integration automatically identifies ASF02 feeders in Bluetooth range —
+no MAC address or token to look up. When one is discovered, add it from
+**Settings > Devices & Services**. (You can also add one manually by MAC
+address.)
 
-- **MAC address** — the feeder's full Bluetooth MAC address (for example
-  `AA:BB:CC:DD:EE:FF`). It is shown in the vendor app, and the last six
-  characters also appear in the name the feeder advertises over Bluetooth.
-- **Pairing token** — the 10-character pairing token from the vendor app.
-
-If you no longer have the original token, you can instead have the integration
-**generate a new token**. This re-pairs the feeder and the old token stops
-working — useful for recovering a feeder you lost the token to.
-
-The token is checked against the feeder during setup, so a wrong token is
-caught right away instead of surfacing later.
+During setup you're offered a **new pairing token** — the normal path, since
+the original token can't be read back out of the vendor app. Taking it
+re-pairs the feeder, and **any schedule already on the feeder is lost**.
+Re-create the schedule afterwards with the `asf02.set_schedule` service.
 
 ## Entities
 
