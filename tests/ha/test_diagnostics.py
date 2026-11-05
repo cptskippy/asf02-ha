@@ -5,7 +5,7 @@ from __future__ import annotations
 from custom_components.asf02 import const
 from custom_components.asf02.diagnostics import async_get_config_entry_diagnostics
 
-from .conftest import fire_advertisement
+from .conftest import fire_advertisement, poll_once
 from .test_coordinator import _setup
 
 
@@ -20,11 +20,11 @@ async def test_diagnostics_before_any_poll(hass, entry, patched_client, fake_sta
 
 
 async def test_diagnostics_with_snapshot(hass, entry, patched_client, fake_state):
-    await _setup(hass, entry, patched_client)
+    coordinator = await _setup(hass, entry, patched_client)
     fake_state.feed_count = 42
 
     fire_advertisement(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll_once(hass, coordinator)
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     snap = diag["snapshot"]

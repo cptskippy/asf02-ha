@@ -164,3 +164,17 @@ def fire_advertisement(
     info = make_service_info(hass, address, name, connectable)
     _get_manager(hass).scanner_adv_received(info)
     return info
+
+
+async def poll_once(hass, coordinator) -> None:
+    """Drive one poll through the wall-clock timer (the sole poll trigger).
+
+    Resets the last-poll bookkeeping so the interval check passes, then
+    invokes the timer callback directly (no 60 s wait) and awaits the
+    debounced GATT session. The feeder must have seen at least one ad first
+    so the coordinator has a device to connect to.
+    """
+    coordinator._last_poll = None
+    coordinator._first_poll_at = None
+    coordinator._interval_poll_check()
+    await hass.async_block_till_done(wait_background_tasks=True)

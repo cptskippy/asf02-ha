@@ -7,14 +7,14 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.asf02 import const
 
-from .conftest import fire_advertisement
+from .conftest import fire_advertisement, poll_once
 from .test_coordinator import _entities_by_key, _setup
 
 
 async def _ready(hass, entry, patched_client):
     coordinator = await _setup(hass, entry, patched_client)
     fire_advertisement(hass)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll_once(hass, coordinator)
     assert coordinator.data is not None
     return coordinator
 
