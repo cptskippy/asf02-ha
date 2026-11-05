@@ -71,6 +71,7 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
             if not _MAC_RE.match(raw):
                 errors[CONF_ADDRESS] = "invalid_mac"
             else:
+                await self.async_set_unique_id(raw)
                 try:
                     self._async_abort_entries_match({raw})
                 except AbortFlow:
@@ -85,6 +86,7 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_bluetooth(self, data: BluetoothServiceInfoBleak) -> FlowResult:
         """Bluetooth discovery (manifest matcher on local_name ASF02-*)."""
         address = data.address.upper()
+        await self.async_set_unique_id(address)
         self._async_abort_entries_match({address})
         if not data.connectable:
             # Ad-only scanner (e.g. advertisement-only ESPHome proxy).
@@ -96,6 +98,9 @@ class ASF02ConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         self._address = address
         self._discovered_name = data.name
+        # Per-device discovered-card title so the cards are distinguishable.
+        mac_tail = address.replace(":", "")[-6:]
+        self.context["title_placeholders"] = {"name": f"ASF02 Pet Feeder {mac_tail}"}
         return await self.async_step_token()
 
     # ------------------------------------------------------------------
