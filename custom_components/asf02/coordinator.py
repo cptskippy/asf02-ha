@@ -1,10 +1,17 @@
-"""Data acquisition: ad-driven, GATT-polling coordinator for ASF02 feeders.
+"""Data acquisition: timer-driven, GATT-polling coordinator for ASF02 feeders.
 
-Uses core's ``ActiveBluetoothDataUpdateCoordinator`` (same pattern as
-``specialized_turbo``): this device's advertisements carry no payload, but
-they are the liveness signal — they mark the device available, mark it
-unavailable when ads stop (learned interval), and gate the polls. Each poll
-is one transient GATT session: connect → unlock → time sync →
+Built on core's ``ActiveBluetoothDataUpdateCoordinator``: the feeder's
+advertisements carry no payload and are treated only as a liveness signal —
+they mark the device available, and mark it unavailable when ads stop.
+
+The poll itself is driven by a wall-clock timer (``poll_interval_seconds``),
+not by the arrival of an advertisement: this device is always in range, and
+gating the poll on advertisement arrival starves the sensors whenever the
+advertisements go sparse (observed: HA received the feeder's ads only a
+handful of times over five hours, so ad-gated polls fired once or twice an
+hour). The timer schedules a poll using the last known device; an
+advertisement, when it does arrive, simply accelerates the next due poll.
+Each poll is one transient GATT session: connect → unlock → time sync →
 info/status/schedule → disconnect.
 
 All GATT sessions (polls and service calls) are serialized through
@@ -19,6 +26,7 @@ import datetime
 import logging
 import zlib
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from bleak import BleakError
@@ -28,6 +36,7 @@ from homeassistant.components.bluetooth.active_update_coordinator import (
 )
 from homeassistant.components.bluetooth.models import BluetoothServiceInfoBleak
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -84,7 +93,11 @@ class FeederSnapshot:
 
 
 class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
-    """Poll the feeder with transient GATT sessions, gated on advertisements."""
+    """Poll the feeder with transient GATT sessions on an interval timer.
+
+    Advertisements mark availability and can accelerate a poll, but the poll
+    cadence is set by the wall-clock timer, not by ad arrival.
+    """
 
     def __init__(
         self,
@@ -356,6 +369,40 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+    @callback
+    def _async_start(self) -> None:
+        """Start ad tracking and the interval poll timer."""
+        super()._async_start()
+        # Wall-clock poll driver: fires every 60 s and schedules a poll when
+        # the configured interval has elapsed. The minimum poll interval is
+        # 1 min, so a 60 s tick keeps a poll within a minute of being due.
+        self._on_stop.append(
+            async_track_time_interval(
+                self.hass,
+                self._interval_poll_check,
+                timedelta(seconds=60),
+            )
+        )
+
+    @callback
+    def _interval_poll_check(self) -> None:
+        """Timer-driven poll: schedule when the interval has elapsed.
+
+        Independent of advertisement arrival — the device is always in range,
+        so the cadence is the timer's, not the ad stream's. Connects using the
+        last known service info (the BLEDevice).
+        """
+        if self._shutdown_requested or self._feed_in_progress:
+            return
+        if self._last_service_info is None:
+            # No advertisement has been seen yet — nothing to connect to.
+            return
+        if self._last_poll is not None:
+            poll_age = self.hass.loop.time() - self._last_poll
+            if poll_age < self.poll_interval_seconds:
+                return
+        self._debounced_poll.async_schedule_call()
+
     @callback
     def async_mark_shutdown(self) -> None:
         """Stop scheduling new polls (called from entry unload)."""
