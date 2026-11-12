@@ -35,11 +35,11 @@ async def test_entry_setup_creates_entities_unavailable(hass, entry, patched_cli
     entities = _entities_by_key(hass, entry)
     assert sorted(entities) == [
         "battery",
-        "battery_low",
         "device_time",
-        "fed_recently",
+        "feed",
         "feed_count",
-        "feeding",
+        "portions",
+        "refresh",
         "schedule",
     ]
     # No advertisement yet: entities exist but are unavailable.
@@ -80,19 +80,9 @@ async def test_poll_fills_entities(hass, entry, patched_client, fake_state):
     assert battery.state == "522"
     feed_count = hass.states.get(entities["feed_count"])
     assert feed_count.state == "0"
-    feeding = hass.states.get(entities["feeding"])
-    assert feeding.state == "off"
-
-
-async def test_battery_low_binary(hass, entry, patched_client, fake_state):
-    coordinator = await _setup(hass, entry, patched_client)
-    fake_state.battery_raw = const.BATTERY_LOW_THRESHOLD - 10
-
-    fire_advertisement(hass)
-    await poll_once(hass, coordinator)
-
-    entities = _entities_by_key(hass, entry)
-    assert hass.states.get(entities["battery_low"]).state == "on"
+    # The Portions number starts at its default (whole portions, no unit).
+    portions = hass.states.get(entities["portions"])
+    assert portions.state == "1"
 
 
 async def test_timer_does_not_poll_within_interval(hass, entry, patched_client, fake_state):

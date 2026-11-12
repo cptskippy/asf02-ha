@@ -30,11 +30,12 @@ def test_translations_en_present():
 def test_translations_entity_names():
     data = json.loads(_en_path().read_text(encoding="utf-8"))
     sensor = data["entity"]["sensor"]
-    binary = data["entity"]["binary_sensor"]
+    button = data["entity"]["button"]
+    number = data["entity"]["number"]
     assert sensor["battery"]["name"] == "Battery"
     assert sensor["feed_count"]["name"] == "Feed count"
     assert sensor["schedule"]["name"] == "Schedule"
     assert sensor["device_time"]["name"] == "Device time"
-    assert binary["feeding"]["name"] == "Feeding"
-    assert binary["battery_low"]["name"] == "Battery low"
-    assert binary["fed_recently"]["name"] == "Fed recently"
+    assert button["feed"]["name"] == "Feed"
+    assert button["refresh"]["name"] == "Refresh"
+    assert number["portions"]["name"] == "Portions"

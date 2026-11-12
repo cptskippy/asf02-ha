@@ -5,14 +5,15 @@
 This custom integration lets you monitor and control the ASF02 Bluetooth pet
 feeder from Home Assistant. Everything runs locally over Bluetooth — there is
 no cloud and no vendor server in the loop. The integration exposes read-only
-sensors for battery level, feed count, schedule, and device time, and provides
-services to dispense food, stop a dispense, and manage the feeding schedule.
+sensors for battery level, feed count, schedule, and device time, a Feed
+button (with a Portions number) for on-demand feeding, and services to stop
+a dispense and manage the feeding schedule.
 
 ## Features
 
 - **Bluetooth discovery**: automatically finds ASF02 feeders in Bluetooth range, or add one manually by MAC address.
 - **Read-only sensors**: battery, feed count, the current schedule, and the feeder's internal clock.
-- **Binary sensors**: whether the feeder is actively dispensing, whether the battery is low, and whether it fed recently.
+- **Feed button**: set how many portions in the **Portions** number, press **Feed** — no scripts needed.
 - **Dispensing services**: feed a number of portions on demand, stop a dispense in progress, and set or clear the feeding schedule.
 - **Adjustable polling**: choose how often the feeder is read, from 1 minute up to 1 hour.
 - **Local-only**: all communication happens over Bluetooth, directly from your Home Assistant.
@@ -75,18 +76,29 @@ entities.
 
 | Sensor | Description |
 | --- | --- |
-| **Battery** | A number that reflects the battery's charge — higher when fresh, lower as it drains. It is not a percentage (the value depends on how the feeder is powered). For a simple low-battery alert, use the **Battery low** binary sensor. |
-| **Feed count** | Total portions dispensed. Counts up and never resets. |
 | **Schedule** | The feeder's current feeding schedule, shown as a readable list of times and portions. |
+
+Battery, feed count, and device time live in the entity picker's
+**Diagnostics** section:
+
+| Sensor | Description |
+| --- | --- |
+| **Battery** | A number that reflects the battery's charge — higher when fresh, lower as it drains. It is not a percentage (the value depends on how the feeder is powered). |
+| **Feed count** | Total portions dispensed. Counts up and never resets. |
 | **Device time** | The time shown on the feeder's own internal clock. |
 
-### Binary sensors
+### Numbers
 
-| Binary sensor | Description |
+| Number | Description |
 | --- | --- |
-| **Feeding** | On while the feeder's motor is actively dispensing food. |
-| **Battery low** | On when the battery reading reaches the feeder's low-battery threshold. |
-| **Fed recently** | On for 10 minutes after the feeder dispenses. |
+| **Portions** | How many portions the **Feed** button will dispense (1–99). Remembers its value across restarts. |
+
+### Buttons
+
+| Button | Description |
+| --- | --- |
+| **Feed** | Dispenses the number of portions set in the **Portions** number. Returns as soon as the feeder accepts the command; the feed count catches up as the motor runs. |
+| **Refresh** | Polls the feeder immediately (bypassing the poll interval) and updates its entities. Found in the entity picker's **Control** section. |
 
 ## Services
 
@@ -184,5 +196,6 @@ Change this from the integration's options without restarting Home Assistant.
 ### Nothing is dispensing
 
 - Confirm the feeder is not currently locked out by the vendor app.
-- The **Feeding** binary sensor turns on while the motor runs — use it to
-  verify a dispense actually started.
+- Check the **Feed count** sensor — it increments as soon as the feeder
+  accepts a dispense. Use the **Refresh** button to poll the feeder
+  immediately instead of waiting for the next interval.
