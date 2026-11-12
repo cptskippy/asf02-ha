@@ -58,6 +58,13 @@ async def async_get_config_entry_diagnostics(
         "loaded": True,
         "available": coordinator.available,
     }
+    # The local schedule model: HA's copy of the schedule (source of truth
+    # for writes), included alongside the last raw device read in the
+    # snapshot so support can compare the two.
+    result["local_schedule"] = {
+        "source": coordinator.schedule_source,
+        "entries": coordinator.local_schedule,
+    }
     snapshot = coordinator.data
     if snapshot is not None:
         result["snapshot"] = _snapshot_dict(snapshot)

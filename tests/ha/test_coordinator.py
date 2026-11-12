@@ -40,7 +40,10 @@ async def test_entry_setup_creates_entities_unavailable(hass, entry, patched_cli
         "feed_count",
         "portions",
         "refresh",
+        "save_schedule",
         "schedule",
+        "slot_portions",
+        "slot_time",
     ]
     # No advertisement yet: entities exist but are unavailable.
     for entity_id in entities.values():

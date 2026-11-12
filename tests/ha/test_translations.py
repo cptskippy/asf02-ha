@@ -32,10 +32,14 @@ def test_translations_entity_names():
     sensor = data["entity"]["sensor"]
     button = data["entity"]["button"]
     number = data["entity"]["number"]
+    time = data["entity"]["time"]
     assert sensor["battery"]["name"] == "Battery"
     assert sensor["feed_count"]["name"] == "Feed count"
     assert sensor["schedule"]["name"] == "Schedule"
     assert sensor["device_time"]["name"] == "Device time"
     assert button["feed"]["name"] == "Feed"
     assert button["refresh"]["name"] == "Refresh"
+    assert button["save_schedule"]["name"] == "Save schedule"
     assert number["portions"]["name"] == "Portions"
+    assert number["slot_portions"]["name"] == "Slot portions"
+    assert time["slot_time"]["name"] == "Slot time"
