@@ -19,15 +19,18 @@ BATTERY_LOW_THRESHOLD = 410
 
 EVENT_FEED = "asf02_feed"
 
+# Portions number entity / feed button bounds (match the feed service).
+PORTIONS_MIN = 1
+PORTIONS_MAX = 99
+DEFAULT_PORTIONS = 1
+
 # Mid-feed feed() polling / completion-wait tuning.
 FEED_SECONDS_PER_PORTION = 5.1  # measured 2026-09-18
 FEED_WAIT_POLL_INTERVAL = 3.0  # s between status() polls
 FEED_WAIT_MARGIN = 10.0  # s added to the remaining-estimate fallback
 FEED_WAIT_TIMEOUT = 900.0  # s hard cap for wait=True
 
-FED_RECENTLY_WINDOW_SECONDS = 600
-
 MANUFACTURER = "Hong Kong M Spacer Limited"
 MODEL = "CWH01L-A1"
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.NUMBER, Platform.SENSOR]

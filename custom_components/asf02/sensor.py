@@ -10,6 +10,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_ADDRESS
@@ -73,12 +74,12 @@ class ASF02BatterySensor(ASF02Sensor):
 
     Deliberately NO battery device class: that class assumes a 0–100%
     value, but the raw reading is power-source-dependent (≈522 fresh NiMH,
-    ≈428–461 on USB) and would render as a nonsense percentage. The
-    actionable semantic is binary_sensor ..._battery_low (b ≤ 410).
+    ≈428–461 on USB) and would render as a nonsense percentage.
     """
 
     def __init__(self, coordinator: ASF02Coordinator, entry: ASF02ConfigEntry) -> None:
         super().__init__(coordinator, entry, translation_key="battery", unique_key="battery")
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> int | None:
@@ -90,6 +91,7 @@ class ASF02FeedCountSensor(ASF02Sensor):
 
     def __init__(self, coordinator: ASF02Coordinator, entry: ASF02ConfigEntry) -> None:
         super().__init__(coordinator, entry, translation_key="feed_count", unique_key="feed_count")
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_native_unit_of_measurement = "portions"
 
@@ -133,6 +135,7 @@ class ASF02DeviceTimeSensor(ASF02Sensor):
         super().__init__(
             coordinator, entry, translation_key="device_time", unique_key="device_time"
         )
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_device_class = "timestamp"
 
     @property

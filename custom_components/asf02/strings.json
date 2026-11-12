@@ -123,15 +123,17 @@
         "name": "Device time"
       }
     },
-    "binary_sensor": {
-      "feeding": {
-        "name": "Feeding"
+    "button": {
+      "feed": {
+        "name": "Feed"
       },
-      "battery_low": {
-        "name": "Battery low"
-      },
-      "fed_recently": {
-        "name": "Fed recently"
+      "refresh": {
+        "name": "Refresh"
+      }
+    },
+    "number": {
+      "portions": {
+        "name": "Portions"
       }
     }
   }
