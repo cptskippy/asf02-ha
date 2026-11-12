@@ -18,13 +18,13 @@ from .coordinator import ASF02Coordinator
 from .entity import ASF02ConfigEntry, ASF02CoordinatorEntity
 
 
-def _fmt_schedule(snapshot) -> tuple[str, dict[str, Any]]:
-    """Human string + machine-readable attributes for the schedule."""
-    entries = snapshot.schedule
+def _fmt_schedule(entries: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+    """Human string + machine-readable attributes for the schedule model."""
     if not entries:
         return "—", {}
     human = " · ".join(
-        f"{e.hour:02d}:{e.minute:02d} ×{e.portion}" + ("" if e.enabled else " (off)")
+        f"{e['hour']:02d}:{e['minute']:02d} ×{e['portion']}"
+        + ("" if e.get("enabled", True) else " (off)")
         for e in entries
     )
     return human, {"entry_count": len(entries)}
@@ -111,21 +111,29 @@ class ASF02FeedCountSensor(ASF02Sensor):
 
 
 class ASF02ScheduleSensor(ASF02Sensor):
-    """The 10-slot schedule as a human string; slots in attributes."""
+    """The schedule per HA's local model, as a human string.
+
+    Backed by the coordinator's local schedule model, not the device read
+    (the read is unreliable on in-use firmware). ``schedule_source`` says
+    where the model last came from: ``device_read`` (a poll read that
+    answered), ``last_write`` (the device's confirmation of the last save),
+    or ``local`` (built locally, unconfirmed).
+    """
 
     def __init__(self, coordinator: ASF02Coordinator, entry: ASF02ConfigEntry) -> None:
         super().__init__(coordinator, entry, translation_key="schedule", unique_key="schedule")
 
     @property
     def native_value(self) -> str | None:
-        if not self.snapshot:
-            return None
-        return _fmt_schedule(self.snapshot)[0]
+        # The model is local state (loaded at setup), not a live device read —
+        # no snapshot gate. Availability stays ad-driven like the other
+        # entities, so this is unavailable until the first advertisement.
+        return _fmt_schedule(self.coordinator.local_schedule)[0]
 
     def _sensor_attributes(self) -> dict[str, Any]:
-        if not self.snapshot:
-            return {}
-        return _fmt_schedule(self.snapshot)[1]
+        attrs = dict(_fmt_schedule(self.coordinator.local_schedule)[1])
+        attrs["schedule_source"] = self.coordinator.schedule_source
+        return attrs
 
 
 class ASF02DeviceTimeSensor(ASF02Sensor):

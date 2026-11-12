@@ -14,6 +14,7 @@ a dispense and manage the feeding schedule.
 - **Bluetooth discovery**: automatically finds ASF02 feeders in Bluetooth range, or add one manually by MAC address.
 - **Read-only sensors**: battery, feed count, the current schedule, and the feeder's internal clock.
 - **Feed button**: set how many portions in the **Portions** number, press **Feed** — no scripts needed.
+- **Schedule slot editor**: change the time and portions of one schedule slot from the dashboard, then write it to the feeder with a button press.
 - **Dispensing services**: feed a number of portions on demand, stop a dispense in progress, and set or clear the feeding schedule.
 - **Adjustable polling**: choose how often the feeder is read, from 1 minute up to 1 hour.
 - **Local-only**: all communication happens over Bluetooth, directly from your Home Assistant.
@@ -76,7 +77,7 @@ entities.
 
 | Sensor | Description |
 | --- | --- |
-| **Schedule** | The feeder's current feeding schedule, shown as a readable list of times and portions. |
+| **Schedule** | The feeding schedule Home Assistant is keeping, shown as a readable list of times and portions. It updates when you save a slot and refreshes whenever the feeder answers a schedule read. |
 
 Battery, feed count, and device time live in the entity picker's
 **Diagnostics** section:
@@ -92,13 +93,27 @@ Battery, feed count, and device time live in the entity picker's
 | Number | Description |
 | --- | --- |
 | **Portions** | How many portions the **Feed** button will dispense (1–99). Remembers its value across restarts. |
+| **Slot portions** | The portion count for the schedule slot being edited (1–99). Used with **Slot time** and **Save schedule**. Found in the entity picker's **Control** section. |
+
+### Times
+
+| Time | Description |
+| --- | --- |
+| **Slot time** | The time of day for the schedule slot being edited. Used with **Slot portions** and **Save schedule**. Found in the entity picker's **Control** section. |
 
 ### Buttons
 
 | Button | Description |
 | --- | --- |
 | **Feed** | Dispenses the number of portions set in the **Portions** number. Returns as soon as the feeder accepts the command; the feed count catches up as the motor runs. |
+| **Save schedule** | Writes the current **Slot time** and **Slot portions** into the slot chosen in the options and saves the full schedule to the feeder. Found in the entity picker's **Control** section. |
 | **Refresh** | Polls the feeder immediately (bypassing the poll interval) and updates its entities. Found in the entity picker's **Control** section. |
+
+Note: the integration keeps its own copy of the 10-slot schedule (the
+feeder's schedule read is unreliable on in-use firmware). That copy starts
+empty, so the first **Save schedule** press writes a full 10-slot schedule —
+if the feeder already has a schedule that Home Assistant couldn't read,
+enter the full schedule you want before the first save.
 
 ## Services
 
@@ -172,6 +187,8 @@ data:
   from 1 minute to 60 minutes (default 15). A shorter interval updates the
   sensors faster but drains the feeder's battery more quickly. Use a 1-minute
   interval only while troubleshooting.
+- **Schedule slot** — which slot of the feeder's 10-slot schedule (1–10,
+  default 1) the **Slot time** and **Slot portions** entities edit.
 
 Change this from the integration's options without restarting Home Assistant.
 

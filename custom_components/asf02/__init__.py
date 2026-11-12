@@ -85,6 +85,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ASF02ConfigEntry) -> boo
     )
     entry.runtime_data = coordinator
 
+    # Load the persisted local schedule model before the platforms, so the
+    # Schedule sensor can show it from the first state write.
+    await coordinator.async_setup_schedule()
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # The passive base starts the advertisement callback + the
