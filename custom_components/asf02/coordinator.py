@@ -59,8 +59,7 @@ from .const import (
     OPTION_POLL_MINUTES,
     SCHEDULE_PORTION_MAX,
     SCHEDULE_PORTION_MIN,
-    SCHEDULE_SLOT_MAX,
-    SCHEDULE_SLOT_MIN,
+    SCHEDULE_SLOTS,
     SCHEDULE_STORE_VERSION,
 )
 from .managed_client import ManagedClientError, make_client_factory
@@ -136,8 +135,8 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         self._last_ad_log_at: float | None = None
         # Local schedule model (Option A): the device's schedule read is
         # unreliable on in-use firmware, so HA keeps this front-packed copy
-        # as the source of truth for schedule writes. See async_save_slot /
-        # async_setup_schedule.
+        # (firing slots only) as the source of truth for the Schedule sensor.
+        # See async_save_schedule / async_setup_schedule.
         self._local_schedule: list[dict[str, Any]] = []
         self._schedule_source: str | None = None
         self._schedule_store: store_helper.Store | None = None
@@ -251,9 +250,11 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             schedule = await client.get_schedule()
             if schedule:
                 # A non-empty read is authoritative device truth; refresh the
-                # local model. A silent/empty read (the known firmware quirk)
-                # leaves the model alone.
-                new_model = [self._plan_entry_dict(e) for e in schedule]
+                # local model (slots that actually fire). A silent/empty read
+                # (the known firmware quirk) leaves the model alone.
+                new_model = [
+                    self._plan_entry_dict(e) for e in schedule if e.enabled and e.portion > 0
+                ]
                 if new_model != self._local_schedule:
                     self._local_schedule = new_model
                     self._schedule_source = "device_read"
@@ -362,7 +363,12 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
     async def async_clear_schedule(self) -> list:
         async with self._session_lock, self._session_client() as client:
             await client.unlock()
-            return list(await client.set_schedule([], clear=True))
+            confirmation = list(await client.set_schedule([], clear=True))
+        self._local_schedule = []
+        self._schedule_source = "last_write"
+        await self._persist_schedule()
+        self.async_update_listeners()
+        return confirmation
 
     # ------------------------------------------------------------------
     # Local schedule model (Option A)
@@ -436,85 +442,57 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
 
     @staticmethod
     def _decode_plan_array(slots: list) -> list[dict[str, Any]]:
-        """Decode the device's confirmed slot array (10-char hex strings)."""
+        """Decode the device's confirmed slot array (10-char hex strings).
+
+        Keeps only the slots that actually fire (enabled with a positive
+        portion count); empty/clear-marker and disabled slots are dropped.
+        """
         entries: list[dict[str, Any]] = []
         for slot in slots:
             if not isinstance(slot, str):
                 continue
             entry = decode_plan_slot(slot)
-            if entry is not None:
-                entries.append(
-                    {
-                        "hour": entry.hour,
-                        "minute": entry.minute,
-                        "portion": entry.portion,
-                        "enabled": entry.enabled,
-                    }
-                )
+            if entry is None or not (entry.enabled and entry.portion > 0):
+                continue
+            entries.append(
+                {
+                    "hour": entry.hour,
+                    "minute": entry.minute,
+                    "portion": entry.portion,
+                    "enabled": entry.enabled,
+                }
+            )
         return entries
 
-    async def async_save_slot(self, slot: int, hour: int, minute: int, portion: int) -> list:
-        """Set schedule slot (1..10) to hour:minute x portion and write it.
+    async def async_save_schedule(self, entries: list[tuple[int, int, int, bool]]) -> list:
+        """Write the full 10-slot schedule (positional) to the feeder.
 
-        One GATT session: unlock → (seed the model from a schedule read when
-        it is still empty) → set_schedule (full front-packed array) →
+        ``entries`` has one ``(hour, minute, portion, enabled)`` tuple per
+        slot, in slot order (index 0 = slot 1). A slot with a portion count
+        of 0 is disabled (written but never fires).
+
+        One GATT session: unlock → set_schedule (full positional array) →
         refresh the model from the device's confirmed array → persist.
 
         Returns the device-confirmed slot array.
         """
-        if not SCHEDULE_SLOT_MIN <= slot <= SCHEDULE_SLOT_MAX:
-            raise ValueError(f"slot must be {SCHEDULE_SLOT_MIN}..{SCHEDULE_SLOT_MAX}")
-        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
-            raise ValueError(f"invalid time {hour:02d}:{minute:02d}")
-        if not SCHEDULE_PORTION_MIN <= portion <= SCHEDULE_PORTION_MAX:
-            raise ValueError(f"portion must be {SCHEDULE_PORTION_MIN}..{SCHEDULE_PORTION_MAX}")
+        if len(entries) != SCHEDULE_SLOTS:
+            raise ValueError(f"expected {SCHEDULE_SLOTS} schedule entries, got {len(entries)}")
+        for i, (hour, minute, portion, _enabled) in enumerate(entries, start=1):
+            if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                raise ValueError(f"slot {i}: invalid time {hour:02d}:{minute:02d}")
+            if not SCHEDULE_PORTION_MIN <= portion <= SCHEDULE_PORTION_MAX:
+                raise ValueError(
+                    f"slot {i}: portion must be {SCHEDULE_PORTION_MIN}..{SCHEDULE_PORTION_MAX}"
+                )
 
         async with self._session_lock, self._session_client() as client:
             await client.unlock()
-            if not self._local_schedule:
-                # Best-effort seed: when the model is empty, pull whatever
-                # the device reports before writing, so the first save
-                # doesn't blindly replace an existing schedule. No-op when
-                # the read stays silent (the known firmware quirk).
-                try:
-                    read = await client.get_schedule()
-                except BleakError, ASF02Error, TimeoutError:
-                    read = []
-                if read:
-                    self._local_schedule = [self._plan_entry_dict(e) for e in read]
-                    self._schedule_source = "device_read"
-            index = slot - 1
-            while len(self._local_schedule) < index:
-                # Gap fill: disabled entries keep the slot positions aligned
-                # (the device array is positional; a write is always the
-                # full front-packed list).
-                self._local_schedule.append(
-                    {
-                        "hour": hour,
-                        "minute": minute,
-                        "portion": portion,
-                        "enabled": False,
-                    }
-                )
-            entry = {"hour": hour, "minute": minute, "portion": portion, "enabled": True}
-            if index < len(self._local_schedule):
-                self._local_schedule[index] = entry
-            else:
-                self._local_schedule.append(entry)
-            tuples = [
-                (e["hour"], e["minute"], e["portion"], e.get("enabled", True))
-                for e in self._local_schedule
-            ]
-            confirmation = list(await client.set_schedule(tuples))
+            confirmation = list(await client.set_schedule(entries))
 
-        decoded = self._decode_plan_array(confirmation)
-        if decoded:
-            # The write response is the authoritative confirmation.
-            self._local_schedule = decoded
-            self._schedule_source = "last_write"
-        else:
-            # The device confirmed nothing; keep what we built.
-            self._schedule_source = "local"
+        # The write response is the authoritative confirmation.
+        self._local_schedule = self._decode_plan_array(confirmation)
+        self._schedule_source = "last_write"
         await self._persist_schedule()
         # The model changed outside a poll: refresh the entities that read
         # it (the Schedule sensor) so the new schedule shows up now.

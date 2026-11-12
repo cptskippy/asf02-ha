@@ -20,11 +20,10 @@ from asf02 import ASF02Error
 from .const import (
     CONF_ADDRESS,
     DEFAULT_PORTIONS,
-    DEFAULT_SCHEDULE_SLOT,
     DOMAIN,
-    OPTION_SCHEDULE_SLOT,
     PORTIONS_MAX,
     PORTIONS_MIN,
+    SCHEDULE_SLOTS,
 )
 from .coordinator import ASF02Coordinator
 from .entity import ASF02ConfigEntry, ASF02CoordinatorEntity
@@ -48,6 +47,7 @@ async def async_setup_entry(
             ASF02FeedButton(coordinator, entry),
             ASF02RefreshButton(coordinator, entry),
             ASF02SaveScheduleButton(coordinator, entry),
+            ASF02ClearScheduleButton(coordinator, entry),
         ]
     )
 
@@ -123,11 +123,11 @@ class ASF02RefreshButton(ASF02Button):
 
 
 class ASF02SaveScheduleButton(ASF02Button):
-    """Commit the slot time + slot portion drafts to the feeder's schedule.
+    """Commit every slot's time + portion drafts to the feeder's schedule.
 
-    Reads the two draft entities from the state machine (the same pattern
-    the Feed button uses for the Portions number), targets the slot chosen
-    in Options, and writes the full front-packed schedule. The device's
+    Reads the 20 draft entities (Slot N time, Slot N portions) from the
+    state machine and writes the full positional 10-slot schedule. A slot
+    whose portion count is 0 is written as disabled. The device's
     write-confirmation array becomes the new local model.
     """
 
@@ -139,39 +139,77 @@ class ASF02SaveScheduleButton(ASF02Button):
             coordinator, entry, translation_key="save_schedule", unique_key="save_schedule"
         )
 
-    def _slot_index(self) -> int:
-        return self.coordinator.config_entry.options.get(
-            OPTION_SCHEDULE_SLOT, DEFAULT_SCHEDULE_SLOT
-        )
+    @staticmethod
+    def _slot_keys(slot: int) -> tuple[str, str]:
+        """(time unique_key, portions unique_key) for a slot. Slot 1 keeps
+        its pre-0.2.0 keys so existing entities are still found."""
+        time_key = "slot_time" if slot == 1 else f"slot_{slot}_time"
+        portion_key = "slot_portions" if slot == 1 else f"slot_{slot}_portions"
+        return time_key, portion_key
 
-    def _draft(self) -> tuple[int, int, int] | None:
-        """(hour, minute, portion) from the two draft entities, or None."""
+    def _draft_slot(self, slot: int) -> tuple[int, int, int]:
+        """(hour, minute, portion) for one slot.
+
+        A missing or unavailable draft entity defaults to 08:00 and 0
+        portions (disabled), so saving always works even if some slot
+        entities have been removed from the registry.
+        """
         registry = er.async_get(self.hass)
         address = self.coordinator.address
-        time_id = registry.async_get_entity_id("time", DOMAIN, f"{address}_slot_time")
-        portion_id = registry.async_get_entity_id("number", DOMAIN, f"{address}_slot_portions")
+        time_key, portion_key = self._slot_keys(slot)
+        hour, minute = 8, 0
+        portion = 0
+        time_id = registry.async_get_entity_id("time", DOMAIN, f"{address}_{time_key}")
         time_state = self.hass.states.get(time_id) if time_id else None
-        portion_state = self.hass.states.get(portion_id) if portion_id else None
-        if (
-            time_state is None
-            or portion_state is None
-            or time_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN)
-            or portion_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN)
+        if time_state is not None and time_state.state not in (
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
         ):
-            return None
-        try:
-            parsed = dt_time.fromisoformat(time_state.state)
-            portion = int(float(portion_state.state))
-        except ValueError:
-            return None
-        return parsed.hour, parsed.minute, portion
+            try:
+                parsed = dt_time.fromisoformat(time_state.state)
+                hour, minute = parsed.hour, parsed.minute
+            except ValueError:
+                pass
+        portion_id = registry.async_get_entity_id("number", DOMAIN, f"{address}_{portion_key}")
+        portion_state = self.hass.states.get(portion_id) if portion_id else None
+        if portion_state is not None and portion_state.state not in (
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
+        ):
+            try:
+                portion = int(float(portion_state.state))
+            except ValueError:
+                portion = 0
+        return hour, minute, portion
+
+    def _entries(self) -> list[tuple[int, int, int, bool]]:
+        return [
+            (hour, minute, portion, portion > 0)
+            for hour, minute, portion in (
+                self._draft_slot(slot) for slot in range(1, SCHEDULE_SLOTS + 1)
+            )
+        ]
 
     async def async_press(self) -> None:
-        draft = self._draft()
-        if draft is None:
-            raise HomeAssistantError("slot time and slot portions must be set before saving")
-        hour, minute, portion = draft
         try:
-            await self.coordinator.async_save_slot(self._slot_index(), hour, minute, portion)
+            await self.coordinator.async_save_schedule(self._entries())
         except (BleakError, ASF02Error, TimeoutError, ValueError) as err:
             raise HomeAssistantError(f"schedule save failed: {err}") from err
+
+
+class ASF02ClearScheduleButton(ASF02Button):
+    """Clear the feeder's entire schedule (all 10 slots)."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:content-clear"
+
+    def __init__(self, coordinator: ASF02Coordinator, entry: ASF02ConfigEntry) -> None:
+        super().__init__(
+            coordinator, entry, translation_key="clear_schedule", unique_key="clear_schedule"
+        )
+
+    async def async_press(self) -> None:
+        try:
+            await self.coordinator.async_clear_schedule()
+        except (BleakError, ASF02Error, TimeoutError) as err:
+            raise HomeAssistantError(f"schedule clear failed: {err}") from err

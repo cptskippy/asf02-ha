@@ -1,4 +1,4 @@
-"""Time entity for the ASF02 feeder (schedule slot editor)."""
+"""Time entities for the ASF02 feeder (one per schedule slot)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import CONF_ADDRESS
+from .const import CONF_ADDRESS, SCHEDULE_SLOTS
 from .coordinator import ASF02Coordinator
 from .entity import ASF02ConfigEntry, ASF02CoordinatorEntity
 
@@ -24,25 +24,31 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: ASF02Coordinator = entry.runtime_data
-    async_add_entities([ASF02SlotTimeEntity(coordinator, entry)])
+    async_add_entities(
+        [ASF02SlotTimeEntity(coordinator, entry, slot) for slot in range(1, SCHEDULE_SLOTS + 1)]
+    )
 
 
 class ASF02SlotTimeEntity(ASF02CoordinatorEntity, RestoreEntity, TimeEntity):
-    """Draft time for the schedule slot targeted by the Options "Schedule slot".
+    """Draft time for one schedule slot.
 
     The value lives in the entity's state, persisted across restarts by the
-    restore-state helper. The Save schedule button commits it to the feeder
-    together with the slot portion number.
+    restore-state helper. The Save schedule button commits every slot's time
+    (together with its portion count) to the feeder.
     """
 
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:clock-edit-outline"
     _attr_native_value: dt_time = _DEFAULT_SLOT_TIME
 
-    def __init__(self, coordinator: ASF02Coordinator, entry: ASF02ConfigEntry) -> None:
+    def __init__(self, coordinator: ASF02Coordinator, entry: ASF02ConfigEntry, slot: int) -> None:
         super().__init__(coordinator, entry)
-        self._attr_translation_key = "slot_time"
-        self._attr_unique_id = f"{entry.data[CONF_ADDRESS]}_slot_time"
+        self._slot = slot
+        self._attr_translation_key = f"slot_{slot}_time"
+        # Slot 1 keeps its pre-0.2.0 unique_id so existing entities are
+        # renamed in place rather than orphaned and recreated.
+        unique_key = "slot_time" if slot == 1 else f"slot_{slot}_time"
+        self._attr_unique_id = f"{entry.data[CONF_ADDRESS]}_{unique_key}"
 
     async def async_added_to_hass(self) -> None:
         """Restore the last-used time across restarts."""
