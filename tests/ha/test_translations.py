@@ -40,6 +40,8 @@ def test_translations_entity_names():
     assert button["feed"]["name"] == "Feed"
     assert button["refresh"]["name"] == "Refresh"
     assert button["save_schedule"]["name"] == "Save schedule"
+    assert button["clear_schedule"]["name"] == "Clear schedule"
     assert number["portions"]["name"] == "Portions"
-    assert number["slot_portions"]["name"] == "Slot portions"
-    assert time["slot_time"]["name"] == "Slot time"
+    for n in range(1, 11):
+        assert number[f"slot_{n}_portions"]["name"] == f"Slot {n} portions", n
+        assert time[f"slot_{n}_time"]["name"] == f"Slot {n} time", n

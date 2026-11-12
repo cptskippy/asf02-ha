@@ -31,14 +31,10 @@ from .const import (
     CONF_TOKEN,
     CONF_TZ_OFFSET,
     DEFAULT_POLL_MINUTES,
-    DEFAULT_SCHEDULE_SLOT,
     DOMAIN,
     MAX_POLL_MINUTES,
     MIN_POLL_MINUTES,
     OPTION_POLL_MINUTES,
-    OPTION_SCHEDULE_SLOT,
-    SCHEDULE_SLOT_MAX,
-    SCHEDULE_SLOT_MIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -212,7 +208,6 @@ class ASF02OptionsFlow(OptionsFlow):
         if user_input is not None:
             new_options = {
                 OPTION_POLL_MINUTES: user_input[OPTION_POLL_MINUTES],
-                OPTION_SCHEDULE_SLOT: user_input[OPTION_SCHEDULE_SLOT],
             }
             if user_input.get(CONF_CHANGE_TOKEN_FIELD):
                 # Persist the options, then go to the token step.
@@ -223,7 +218,6 @@ class ASF02OptionsFlow(OptionsFlow):
                 return await self.async_step_token()
             return self.async_create_entry(data=new_options)
         current = self.config_entry.options.get(OPTION_POLL_MINUTES, DEFAULT_POLL_MINUTES)
-        current_slot = self.config_entry.options.get(OPTION_SCHEDULE_SLOT, DEFAULT_SCHEDULE_SLOT)
         token = self.config_entry.data.get(CONF_TOKEN, "")
         return self.async_show_form(
             step_id="init",
@@ -237,16 +231,6 @@ class ASF02OptionsFlow(OptionsFlow):
                             step=1,
                             unit_of_measurement="min",
                             mode=selector.NumberSelectorMode.SLIDER,
-                        )
-                    ),
-                    vol.Required(
-                        OPTION_SCHEDULE_SLOT, default=current_slot
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=SCHEDULE_SLOT_MIN,
-                            max=SCHEDULE_SLOT_MAX,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
                         )
                     ),
                     vol.Optional(CONF_CHANGE_TOKEN_FIELD, default=False): cv.boolean,

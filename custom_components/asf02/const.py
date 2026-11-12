@@ -3,7 +3,7 @@
 from homeassistant.const import Platform
 
 DOMAIN = "asf02"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 CONF_ADDRESS = "address"
 CONF_TOKEN = "token"
@@ -24,15 +24,13 @@ PORTIONS_MIN = 1
 PORTIONS_MAX = 99
 DEFAULT_PORTIONS = 1
 
-# Schedule slot editor: which slot the editor entities target (options) and
-# the slot portion bounds (match the feed service / Portions number).
-OPTION_SCHEDULE_SLOT = "schedule_slot"
-SCHEDULE_SLOT_MIN = 1
-SCHEDULE_SLOT_MAX = 10
-DEFAULT_SCHEDULE_SLOT = 1
-SCHEDULE_PORTION_MIN = 1
+# Schedule slot editor: the feeder stores a fixed 10-slot schedule and HA
+# exposes a time + portions entity pair for every slot. A slot's portion
+# count of 0 disables that slot (it is written but never fires).
+SCHEDULE_SLOTS = 10
+SCHEDULE_PORTION_MIN = 0
 SCHEDULE_PORTION_MAX = 99
-DEFAULT_SCHEDULE_PORTION = 1
+DEFAULT_SCHEDULE_PORTION = 0
 
 # Local schedule model persistence. The device's schedule read is
 # unreliable on in-use firmware, so HA keeps a local copy of the schedule

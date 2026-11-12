@@ -91,7 +91,6 @@
         "description": "Current pairing token: **{token}** — the key that grants a client control of the feeder without resetting it. Share it here to let a second client control the feeder concurrently. If it's lost, you're not locked out: generate a new token below to re-pair (this resets the feeder and erases its schedules).\n\nLower intervals update the sensors faster but increase Bluetooth airtime and battery drain on the feeder. Use 1-minute intervals for debugging only.",
         "data": {
           "poll_minutes": "Poll interval (minutes)",
-          "schedule_slot": "Schedule slot (1-10)",
           "change_token": "Change the pairing token (re-pairs the feeder)"
         }
       },
@@ -133,19 +132,76 @@
       },
       "save_schedule": {
         "name": "Save schedule"
+      },
+      "clear_schedule": {
+        "name": "Clear schedule"
       }
     },
     "number": {
       "portions": {
         "name": "Portions"
       },
-      "slot_portions": {
-        "name": "Slot portions"
+      "slot_1_portions": {
+        "name": "Slot 1 portions"
+      },
+      "slot_2_portions": {
+        "name": "Slot 2 portions"
+      },
+      "slot_3_portions": {
+        "name": "Slot 3 portions"
+      },
+      "slot_4_portions": {
+        "name": "Slot 4 portions"
+      },
+      "slot_5_portions": {
+        "name": "Slot 5 portions"
+      },
+      "slot_6_portions": {
+        "name": "Slot 6 portions"
+      },
+      "slot_7_portions": {
+        "name": "Slot 7 portions"
+      },
+      "slot_8_portions": {
+        "name": "Slot 8 portions"
+      },
+      "slot_9_portions": {
+        "name": "Slot 9 portions"
+      },
+      "slot_10_portions": {
+        "name": "Slot 10 portions"
       }
     },
     "time": {
-      "slot_time": {
-        "name": "Slot time"
+      "slot_1_time": {
+        "name": "Slot 1 time"
+      },
+      "slot_2_time": {
+        "name": "Slot 2 time"
+      },
+      "slot_3_time": {
+        "name": "Slot 3 time"
+      },
+      "slot_4_time": {
+        "name": "Slot 4 time"
+      },
+      "slot_5_time": {
+        "name": "Slot 5 time"
+      },
+      "slot_6_time": {
+        "name": "Slot 6 time"
+      },
+      "slot_7_time": {
+        "name": "Slot 7 time"
+      },
+      "slot_8_time": {
+        "name": "Slot 8 time"
+      },
+      "slot_9_time": {
+        "name": "Slot 9 time"
+      },
+      "slot_10_time": {
+        "name": "Slot 10 time"
       }
     }
   }

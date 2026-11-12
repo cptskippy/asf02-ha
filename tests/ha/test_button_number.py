@@ -164,9 +164,14 @@ async def test_entity_categories(hass, entry, patched_client):
     # Diagnostic: battery, feed count, device time.
     for key in ("battery", "feed_count", "device_time"):
         assert category(key) is EntityCategory.DIAGNOSTIC, key
-    # Control: refresh + the schedule slot editor.
-    for key in ("refresh", "save_schedule", "slot_time", "slot_portions"):
+    # Control: refresh, save/clear schedule, and the schedule slot editor.
+    for key in ("refresh", "save_schedule", "clear_schedule"):
         assert category(key) is EntityCategory.CONFIG, key
+    for n in range(1, 11):
+        time_key = "slot_time" if n == 1 else f"slot_{n}_time"
+        portion_key = "slot_portions" if n == 1 else f"slot_{n}_portions"
+        assert category(time_key) is EntityCategory.CONFIG, time_key
+        assert category(portion_key) is EntityCategory.CONFIG, portion_key
     # Default (main section): schedule sensor, feed button, portions number.
     for key in ("schedule", "feed", "portions"):
         assert category(key) is None, key
