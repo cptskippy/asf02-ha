@@ -13,8 +13,9 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.loader import async_get_integration
 
-from .const import DOMAIN, VERSION
+from .const import DOMAIN
 from .coordinator import ASF02Coordinator, FeederSnapshot
 
 
@@ -44,17 +45,22 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     """Return the cached coordinator state (no new BLE query)."""
+    # The integration version lives in manifest.json (HA's single source of
+    # truth); read it from the manifest HA already loaded rather than a
+    # separate constant.
+    integration = await async_get_integration(hass, DOMAIN)
+    integration_version = integration.manifest.get("version", "unknown")
     coordinator = entry.runtime_data
     if not isinstance(coordinator, ASF02Coordinator):
         return {
             "domain": DOMAIN,
-            "integration_version": VERSION,
+            "integration_version": integration_version,
             "loaded": False,
             "note": "entry not set up yet (coordinator absent)",
         }
     result: dict[str, Any] = {
         "domain": DOMAIN,
-        "integration_version": VERSION,
+        "integration_version": integration_version,
         "loaded": True,
         "available": coordinator.available,
     }
