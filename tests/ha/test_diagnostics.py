@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from homeassistant.loader import async_get_integration
+
 from custom_components.asf02 import const
 from custom_components.asf02.diagnostics import async_get_config_entry_diagnostics
 
@@ -14,7 +16,9 @@ async def test_diagnostics_before_any_poll(hass, entry, patched_client, fake_sta
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["loaded"] is True
-    assert diag["integration_version"] == const.VERSION
+    # The reported version must come from manifest.json (the single source).
+    integration = await async_get_integration(hass, const.DOMAIN)
+    assert diag["integration_version"] == integration.manifest["version"]
     assert "snapshot" not in diag
     assert fake_state.connect_count == 0  # no new BLE query
 
