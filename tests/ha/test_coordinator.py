@@ -230,3 +230,32 @@ async def test_failed_poll_keeps_previous_data(hass, entry, patched_client):
     await coordinator._async_poll()
     assert coordinator.data is before
     assert coordinator.last_poll_successful is False
+
+
+async def test_device_time_uses_ha_time_zone(hass, entry, patched_client):
+    """_device_time follows HA's configured timezone, not the host's (#27).
+
+    The host runs UTC; the old ``.astimezone()`` would return UTC here. With
+    HA's timezone set to America/Los_Angeles, the result must be in that zone.
+    """
+    import datetime
+    import homeassistant.util.dt as dt_util
+
+    coordinator = await _setup(hass, entry, patched_client)
+    fire_advertisement(hass)
+    await poll_once(hass, coordinator)
+
+    # Switch HA's timezone for the call and restore it in the body (not via
+    # monkeypatch): the hass fixture's teardown asserts DEFAULT_TIME_ZONE is
+    # UTC, and monkeypatch's finalizer can run after that check has passed.
+    tz = dt_util.get_time_zone("America/Los_Angeles")
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(tz)
+    try:
+        # 1700000000 = 2023-11-14 22:13:20 UTC = 14:13:20 PST (LA).
+        result = coordinator._device_time({"t": 1700000000})
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+    assert result is not None
+    assert result.tzinfo == tz
+    assert result == datetime.datetime(2023, 11, 14, 14, 13, 20, tzinfo=tz)

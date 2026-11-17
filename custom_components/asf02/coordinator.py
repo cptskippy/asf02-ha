@@ -243,13 +243,21 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         )
 
     def _device_time(self, unlock_result: Any) -> datetime.datetime | None:
-        """Device clock from the unlock response (epoch seconds), local tz."""
+        """Device clock from the unlock response (epoch seconds).
+
+        Converted with ``dt_util.as_local`` so it follows HA's configured
+        timezone, matching the rest of the coordinator (``fetched_at``,
+        ``last_feed_at``). The old ``.astimezone()`` used the host's local
+        timezone, which diverges from HA's whenever the two differ (#27).
+        """
         if not isinstance(unlock_result, dict):
             return None
         value = unlock_result.get("t")
         if not isinstance(value, (int, float)):
             return None
-        return datetime.datetime.fromtimestamp(int(value), tz=datetime.UTC).astimezone()
+        return dt_util.as_local(
+            datetime.datetime.fromtimestamp(int(value), tz=datetime.UTC)
+        )
 
     async def _session_read(self, service_info: BluetoothServiceInfoBleak) -> FeederSnapshot:
         """One full poll: unlock → time sync → info/status/schedule."""
