@@ -89,7 +89,7 @@ async def test_feed_button_dispenses_portions_value(hass, entry, patched_client,
     assert hass.states.get(entities["feed"]).state != "unavailable"
     # One transient GATT session for the feed (connect → unlock → feed → status).
     assert fake_state.connect_count == 1
-    assert coordinator._feed_in_progress is False
+    assert coordinator._feed_in_progress == 0
 
 
 async def test_feed_button_falls_back_to_default_portions(hass, entry, patched_client, fake_state):

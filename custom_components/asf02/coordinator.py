@@ -131,7 +131,11 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         self._last_feed_at: datetime.datetime | None = None
         self._first_poll_at: float | None = None
         self._shutdown_requested = False
-        self._feed_in_progress = False
+        # Number of feeds in flight (or queued behind the session lock) — a
+        # counter, not a bool, so overlapping async_feed calls can't clear it
+        # early: the first feed's finally runs while the second is still
+        # pending, which would let the poll guard / refresh check misfire (#25).
+        self._feed_in_progress = 0
         self._last_ad_log_at: float | None = None
         # Local schedule model (Option A): the device's schedule read is
         # unreliable on in-use firmware, so HA keeps this front-packed copy
@@ -310,7 +314,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         """Dispense portions; ``wait`` blocks until the dispense completes."""
         if not isinstance(portions, int) or not 1 <= portions <= 99:
             raise ValueError("portions must be an integer 1..99")
-        self._feed_in_progress = True
+        self._feed_in_progress += 1
         try:
             async with self._session_lock, self._session_client() as client:
                 await client.unlock()
@@ -319,7 +323,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
                 if wait:
                     status = await self._await_completion(client, portions, status)
         finally:
-            self._feed_in_progress = False
+            self._feed_in_progress -= 1
         feed_count = int(status.get("n", 0))
         self._maybe_fire_feed_event_from_count(feed_count)
         return {"fed": bool(ack), "portions": portions, "feed_count": feed_count}
