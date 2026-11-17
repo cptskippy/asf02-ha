@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from bleak import BleakClient
+from bleak import BleakClient, BleakError
 from bleak.backends.device import BLEDevice
 from bleak_retry_connector import establish_connection
 from habluetooth import HaBleakClientWrapper
@@ -43,8 +43,14 @@ _LOGGER = logging.getLogger(__name__)
 _UNCONNECTED = object()
 
 
-class ManagedClientError(Exception):
-    """No connectable adapter/proxy can reach the device right now."""
+class ManagedClientError(BleakError):
+    """No connectable adapter/proxy can reach the device right now.
+
+    Subclasses ``BleakError`` so the standard connection-error handlers
+    (``except (BleakError, ASF02Error, TimeoutError)`` in the services,
+    buttons, and config flow) catch it and surface a friendly error, instead
+    of letting it escape as a raw traceback.
+    """
 
     def __init__(self, address: str) -> None:
         super().__init__(f"no connectable Bluetooth path to {address}")

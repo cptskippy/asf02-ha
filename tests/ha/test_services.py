@@ -119,3 +119,39 @@ async def test_service_rejects_non_asf02_entity(hass, entry, patched_client, fak
             {"entity_id": "light.nonexistent_entity", "portions": 1},
             blocking=True,
         )
+
+
+def test_managed_client_error_is_a_bleak_error():
+    """ManagedClientError subclasses BleakError so the standard
+    connection-error handlers catch it (#20)."""
+    from bleak import BleakError
+
+    from custom_components.asf02.managed_client import ManagedClientError
+
+    assert issubclass(ManagedClientError, BleakError)
+    assert isinstance(ManagedClientError("AA:BB:CC:DD:EE:FF"), BleakError)
+
+
+async def test_feed_service_converts_managed_client_error(
+    hass, entry, patched_client, monkeypatch
+):
+    """A ManagedClientError from the radio surfaces as a friendly
+    HomeAssistantError, not a raw traceback (#20)."""
+    from custom_components.asf02.managed_client import ManagedClientError
+
+    await _ready(hass, entry, patched_client)
+    coordinator = entry.runtime_data
+    entity_id = _entities_by_key(hass, entry)["feed_count"]
+
+    async def raise_managed(_portions, wait=False):
+        raise ManagedClientError(coordinator.address)
+
+    monkeypatch.setattr(coordinator, "async_feed", raise_managed)
+
+    with pytest.raises(HomeAssistantError, match="feed failed"):
+        await hass.services.async_call(
+            const.DOMAIN,
+            "feed",
+            {"entity_id": entity_id, "portions": 1},
+            blocking=True,
+        )
