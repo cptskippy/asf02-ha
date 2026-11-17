@@ -239,6 +239,7 @@ async def test_device_time_uses_ha_time_zone(hass, entry, patched_client):
     HA's timezone set to America/Los_Angeles, the result must be in that zone.
     """
     import datetime
+
     import homeassistant.util.dt as dt_util
 
     coordinator = await _setup(hass, entry, patched_client)

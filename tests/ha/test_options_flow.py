@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
 
-from custom_components.asf02 import const
 import custom_components.asf02.config_flow as config_flow
+from custom_components.asf02 import const
 
 from .conftest import fire_advertisement  # noqa: F401  (fixture availability)
 from .test_coordinator import _setup
