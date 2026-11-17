@@ -2,9 +2,12 @@
 
 Reports the last cached snapshot only — never opens a GATT session, so a
 diagnostics download is always safe even while the feeder is feeding.
-The config entry's own data (address, token) is included in the download
-by core; that is intentional — the token is what support needs to help
-re-pair a feeder.
+
+The download is safe to paste into a public issue: it contains no secrets.
+The pairing token is deliberately excluded (it is not part of the
+coordinator's snapshot) — a leaked token would let a stranger unlock and
+drive the feeder, and support does not need one (the owner can regenerate
+it from the options flow).
 """
 
 from __future__ import annotations
