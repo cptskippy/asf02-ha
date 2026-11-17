@@ -21,6 +21,8 @@ from .const import (
     CONF_TOKEN,
     DOMAIN,
     PLATFORMS,
+    SCHEDULE_PORTION_MAX,
+    SCHEDULE_PORTION_MIN,
 )
 from .coordinator import ASF02Coordinator
 
@@ -41,7 +43,11 @@ CONF_ENTRIES = "entries"
 SCHEDULE_ENTRY_SCHEMA = vol.Schema(
     {
         vol.Required("time"): vol.All(cv.string, vol.Match(r"^\d{2}:\d{2}$")),
-        vol.Required("portion"): vol.All(cv.positive_int, vol.Range(min=1, max=9)),
+        # Match the slot editor's bounds (SCHEDULE_PORTION_MIN..MAX, 0 = a
+        # disabled slot) so the service and the editor accept the same range.
+        vol.Required("portion"): vol.All(
+            vol.Coerce(int), vol.Range(min=SCHEDULE_PORTION_MIN, max=SCHEDULE_PORTION_MAX)
+        ),
         vol.Optional("enabled", default=True): cv.boolean,
     }
 )

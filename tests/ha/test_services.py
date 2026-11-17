@@ -103,6 +103,42 @@ async def test_set_schedule_service_updates_local_model(hass, entry, patched_cli
     assert coordinator.schedule_source == "last_write"
 
 
+async def test_set_schedule_service_portion_range(hass, entry, patched_client, fake_state):
+    """The set_schedule service accepts the editor's portion range (0-99),
+    not the old 1-9 limit (#22)."""
+    import probatio
+
+    await _ready(hass, entry, patched_client)
+    entity_id = _entities_by_key(hass, entry)["feed_count"]
+
+    # 50 was rejected by the old max=9; it is accepted now.
+    await hass.services.async_call(
+        const.DOMAIN,
+        "set_schedule",
+        {"entity_id": entity_id, "entries": [{"time": "07:30", "portion": 50}]},
+        blocking=True,
+    )
+    assert fake_state.schedule[0] == "00071e3201"
+
+    # 0 is now a valid (disabled-slot) portion, matching the editor.
+    await hass.services.async_call(
+        const.DOMAIN,
+        "set_schedule",
+        {"entity_id": entity_id, "entries": [{"time": "08:00", "portion": 0}]},
+        blocking=True,
+    )
+    assert fake_state.schedule[0] == "0008000001"
+
+    # 100 still exceeds the 0-99 range and is rejected by the schema.
+    with pytest.raises(probatio.Invalid):
+        await hass.services.async_call(
+            const.DOMAIN,
+            "set_schedule",
+            {"entity_id": entity_id, "entries": [{"time": "07:30", "portion": 100}]},
+            blocking=True,
+        )
+
+
 async def test_clear_schedule_service(hass, entry, patched_client, fake_state):
     await _ready(hass, entry, patched_client)
     entity_id = _entities_by_key(hass, entry)["feed_count"]
