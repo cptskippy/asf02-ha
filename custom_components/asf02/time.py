@@ -54,13 +54,22 @@ class ASF02SlotTimeEntity(ASF02CoordinatorEntity, RestoreEntity, TimeEntity):
         """Restore the last-used time across restarts."""
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
-        if last_state is None or last_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return
-        try:
-            parsed = dt_time.fromisoformat(last_state.state)
-        except ValueError:
-            return
-        self._attr_native_value = parsed.replace(second=0, microsecond=0)
+        if last_state is not None and last_state.state not in (
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
+        ):
+            try:
+                parsed = dt_time.fromisoformat(last_state.state)
+                self._attr_native_value = parsed.replace(second=0, microsecond=0)
+            except ValueError:
+                pass
+        # Register with the coordinator so the Save button can read this slot's
+        # draft from the entity object (in memory), not the state machine (#24).
+        self.coordinator.register_slot_time_draft(self._slot, self)
+
+    def draft_value(self) -> dt_time:
+        """The slot's draft time (the entity's in-memory value)."""
+        return self._attr_native_value
 
     async def async_set_value(self, value: dt_time) -> None:
         self._attr_native_value = value.replace(second=0, microsecond=0)

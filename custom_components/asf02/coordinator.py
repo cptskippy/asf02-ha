@@ -140,6 +140,13 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         self._local_schedule: list[dict[str, Any]] = []
         self._schedule_source: str | None = None
         self._schedule_store: store_helper.Store | None = None
+        # Draft entities: each slot's time/portion entity registers itself
+        # here (via the time/number platforms) so the Save button can read a
+        # slot's draft from the entity object (in memory) rather than the
+        # state machine, where a transiently unavailable state would silently
+        # default the slot to disabled on save (#24).
+        self._slot_draft_time: dict[int, Any] = {}
+        self._slot_draft_portion: dict[int, Any] = {}
 
     @property
     def last_feed_at(self) -> datetime.datetime | None:
@@ -395,6 +402,34 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
     def schedule_source(self) -> str | None:
         """Where local_schedule last came from: device_read / last_write / local."""
         return self._schedule_source
+
+    def register_slot_time_draft(self, slot: int, time_entity: Any) -> None:
+        """Register a slot's time-draft entity (called by the time platform)."""
+        self._slot_draft_time[slot] = time_entity
+
+    def register_slot_portion_draft(self, slot: int, portion_entity: Any) -> None:
+        """Register a slot's portion-draft entity (called by the number platform)."""
+        self._slot_draft_portion[slot] = portion_entity
+
+    def draft_slot(self, slot: int) -> tuple[int, int, int]:
+        """(hour, minute, portion) for a slot's draft.
+
+        Reads the slot's draft entities from the entity objects (in memory),
+        not the state machine, so a transiently unavailable state can't
+        silently zero a slot on save (#24). Falls back to 08:00 / 0 portions
+        only when the slot's draft entities were never registered (platform
+        setup not complete).
+        """
+        time_entity = self._slot_draft_time.get(slot)
+        portion_entity = self._slot_draft_portion.get(slot)
+        hour = minute = 8
+        portion = 0
+        if time_entity is not None:
+            value = time_entity.draft_value()
+            hour, minute = value.hour, value.minute
+        if portion_entity is not None:
+            portion = int(portion_entity.draft_value())
+        return hour, minute, portion
 
     def _schedule_store_key(self) -> str:
         return f"asf02_{self.address.lower().replace(':', '')}"

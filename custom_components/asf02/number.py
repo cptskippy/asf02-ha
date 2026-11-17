@@ -116,12 +116,21 @@ class ASF02SlotPortionNumber(ASF02CoordinatorEntity, RestoreEntity, NumberEntity
         """Restore the last-used value across restarts."""
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
-        if last_state is None or last_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return
-        try:
-            self._attr_native_value = _clamp_schedule_portion(float(last_state.state))
-        except ValueError:
-            pass
+        if last_state is not None and last_state.state not in (
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
+        ):
+            try:
+                self._attr_native_value = _clamp_schedule_portion(float(last_state.state))
+            except ValueError:
+                pass
+        # Register with the coordinator so the Save button can read this slot's
+        # draft from the entity object (in memory), not the state machine (#24).
+        self.coordinator.register_slot_portion_draft(self._slot, self)
+
+    def draft_value(self) -> int:
+        """The slot's draft portion count (the entity's in-memory value)."""
+        return int(self._attr_native_value)
 
     async def async_set_native_value(self, value: float) -> None:
         self._attr_native_value = _clamp_schedule_portion(value)
