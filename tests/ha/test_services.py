@@ -75,6 +75,34 @@ async def test_set_schedule_service(hass, entry, patched_client, fake_state):
     assert fake_state.schedule[2:] == [""] * 8
 
 
+async def test_set_schedule_service_updates_local_model(hass, entry, patched_client, fake_state):
+    """The set_schedule service refreshes the local model so the slot
+    entities reflect the new schedule immediately, not on the next poll (#21)."""
+    await _ready(hass, entry, patched_client)
+    coordinator = entry.runtime_data
+    entity_id = _entities_by_key(hass, entry)["feed_count"]
+
+    await hass.services.async_call(
+        const.DOMAIN,
+        "set_schedule",
+        {
+            "entity_id": entity_id,
+            "entries": [
+                {"time": "07:30", "portion": 2},
+                {"time": "18:00", "portion": 3, "enabled": False},
+            ],
+        },
+        blocking=True,
+    )
+
+    # The model now matches the write: only the firing slot is kept, and it
+    # is attributed to this write (not a device read).
+    assert coordinator.local_schedule == [
+        {"hour": 7, "minute": 30, "portion": 2, "enabled": True}
+    ]
+    assert coordinator.schedule_source == "last_write"
+
+
 async def test_clear_schedule_service(hass, entry, patched_client, fake_state):
     await _ready(hass, entry, patched_client)
     entity_id = _entities_by_key(hass, entry)["feed_count"]

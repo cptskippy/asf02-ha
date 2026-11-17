@@ -355,10 +355,16 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         return {"ok": bool(result)}
 
     async def async_set_schedule(self, entries: list[tuple[int, int, int, bool]]) -> list:
-        """Full 10-slot schedule replace; returns the device-confirmed array."""
+        """Replace the schedule (partial list; the client pads to 10 slots).
+
+        Updates the local model from the device's confirmed array so the slot
+        entities reflect the new schedule now, not on the next poll (#21).
+        """
         async with self._session_lock, self._session_client() as client:
             await client.unlock()
-            return list(await client.set_schedule(entries))
+            confirmation = list(await client.set_schedule(entries))
+        await self._apply_schedule_confirmation(confirmation)
+        return confirmation
 
     async def async_clear_schedule(self) -> list:
         async with self._session_lock, self._session_client() as client:
@@ -464,6 +470,21 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             )
         return entries
 
+    async def _apply_schedule_confirmation(self, confirmation: list) -> None:
+        """Refresh the local model from a device-confirmed slot array.
+
+        Shared by async_set_schedule and async_save_schedule: decode the
+        confirmed array into the local model, mark it last_write, persist it,
+        and refresh the entities that read it (the Schedule sensor) so the new
+        schedule shows up now instead of on the next poll.
+        """
+        self._local_schedule = self._decode_plan_array(confirmation)
+        self._schedule_source = "last_write"
+        await self._persist_schedule()
+        # The model changed outside a poll: refresh the entities that read
+        # it (the Schedule sensor) so the new schedule shows up now.
+        self.async_update_listeners()
+
     async def async_save_schedule(self, entries: list[tuple[int, int, int, bool]]) -> list:
         """Write the full 10-slot schedule (positional) to the feeder.
 
@@ -491,12 +512,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             confirmation = list(await client.set_schedule(entries))
 
         # The write response is the authoritative confirmation.
-        self._local_schedule = self._decode_plan_array(confirmation)
-        self._schedule_source = "last_write"
-        await self._persist_schedule()
-        # The model changed outside a poll: refresh the entities that read
-        # it (the Schedule sensor) so the new schedule shows up now.
-        self.async_update_listeners()
+        await self._apply_schedule_confirmation(confirmation)
         return confirmation
 
     # ------------------------------------------------------------------
