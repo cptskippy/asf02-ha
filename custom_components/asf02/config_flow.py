@@ -260,10 +260,17 @@ class ASF02OptionsFlow(OptionsFlow):
                     _LOGGER.debug("ASF02 token-change session failed: %s", err)
                     errors["base"] = "cannot_connect"
                 else:
-                    # Update the entry in place (reload picks up the new token).
+                    # Update the token in place, then schedule a reload so the
+                    # coordinator (which captures the token at setup) picks up
+                    # the new one. An options-flow auto-reload won't do it: the
+                    # token lives in entry.data and the options are unchanged
+                    # here, so the reload is scheduled explicitly.
                     self.hass.config_entries.async_update_entry(
                         self.config_entry,
                         data={**self.config_entry.data, CONF_TOKEN: token},
+                    )
+                    self.hass.config_entries.async_schedule_reload(
+                        self.config_entry.entry_id
                     )
                     # Preserve the existing options (this step only changed the token).
                     return self.async_create_entry(data=dict(self.config_entry.options))
