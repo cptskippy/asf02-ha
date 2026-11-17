@@ -97,9 +97,7 @@ async def test_set_schedule_service_updates_local_model(hass, entry, patched_cli
 
     # The model now matches the write: only the firing slot is kept, and it
     # is attributed to this write (not a device read).
-    assert coordinator.local_schedule == [
-        {"hour": 7, "minute": 30, "portion": 2, "enabled": True}
-    ]
+    assert coordinator.local_schedule == [{"hour": 7, "minute": 30, "portion": 2, "enabled": True}]
     assert coordinator.schedule_source == "last_write"
 
 
@@ -196,9 +194,7 @@ def test_managed_client_error_is_a_bleak_error():
     assert isinstance(ManagedClientError("AA:BB:CC:DD:EE:FF"), BleakError)
 
 
-async def test_feed_service_converts_managed_client_error(
-    hass, entry, patched_client, monkeypatch
-):
+async def test_feed_service_converts_managed_client_error(hass, entry, patched_client, monkeypatch):
     """A ManagedClientError from the radio surfaces as a friendly
     HomeAssistantError, not a raw traceback (#20)."""
     from custom_components.asf02.managed_client import ManagedClientError

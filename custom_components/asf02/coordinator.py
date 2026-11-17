@@ -255,9 +255,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         value = unlock_result.get("t")
         if not isinstance(value, (int, float)):
             return None
-        return dt_util.as_local(
-            datetime.datetime.fromtimestamp(int(value), tz=datetime.UTC)
-        )
+        return dt_util.as_local(datetime.datetime.fromtimestamp(int(value), tz=datetime.UTC))
 
     async def _session_read(self, service_info: BluetoothServiceInfoBleak) -> FeederSnapshot:
         """One full poll: unlock → time sync → info/status/schedule."""

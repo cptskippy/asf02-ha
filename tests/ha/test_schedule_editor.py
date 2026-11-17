@@ -199,7 +199,9 @@ async def test_missing_draft_slot_defaults_to_disabled(hass, entry, patched_clie
     assert coordinator.local_schedule == []
 
 
-async def test_save_preserves_draft_when_entity_unavailable(hass, entry, patched_client, fake_state):
+async def test_save_preserves_draft_when_entity_unavailable(
+    hass, entry, patched_client, fake_state
+):
     """A slot's draft is preserved on save even when its draft entities'
     states go unavailable, so a save can't silently zero a slot (#24).
 
@@ -221,9 +223,7 @@ async def test_save_preserves_draft_when_entity_unavailable(hass, entry, patched
 
     # Slot 1 saved with its draft (07:30 x4), not zeroed to disabled.
     assert fake_state.schedule[0] == encode_plan_entry(7, 30, 4, True)
-    assert coordinator.local_schedule == [
-        {"hour": 7, "minute": 30, "portion": 4, "enabled": True}
-    ]
+    assert coordinator.local_schedule == [{"hour": 7, "minute": 30, "portion": 4, "enabled": True}]
 
 
 async def test_save_schedule_validation(hass, entry, patched_client, fake_state):

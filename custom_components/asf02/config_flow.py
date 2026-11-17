@@ -269,9 +269,7 @@ class ASF02OptionsFlow(OptionsFlow):
                         self.config_entry,
                         data={**self.config_entry.data, CONF_TOKEN: token},
                     )
-                    self.hass.config_entries.async_schedule_reload(
-                        self.config_entry.entry_id
-                    )
+                    self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
                     # Preserve the existing options (this step only changed the token).
                     return self.async_create_entry(data=dict(self.config_entry.options))
         return self._async_show_token_form(errors)
