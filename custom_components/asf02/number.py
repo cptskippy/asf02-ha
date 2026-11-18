@@ -132,6 +132,14 @@ class ASF02SlotPortionNumber(ASF02CoordinatorEntity, RestoreEntity, NumberEntity
         """The slot's draft portion count (the entity's in-memory value)."""
         return int(self._attr_native_value)
 
+    def sync_draft(self, value: int) -> None:
+        """Push a synced portion count into the draft (from the coordinator's
+        model). Keeps the draft in sync when the model changes outside a save
+        (a service write or a device read), so a later Save doesn't revert it.
+        """
+        self._attr_native_value = _clamp_schedule_portion(value)
+        self.async_write_ha_state()
+
     async def async_set_native_value(self, value: float) -> None:
         self._attr_native_value = _clamp_schedule_portion(value)
         self.async_write_ha_state()

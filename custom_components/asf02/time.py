@@ -71,6 +71,15 @@ class ASF02SlotTimeEntity(ASF02CoordinatorEntity, RestoreEntity, TimeEntity):
         """The slot's draft time (the entity's in-memory value)."""
         return self._attr_native_value
 
+    def sync_draft(self, value: dt_time) -> None:
+        """Push a synced time into the draft (from the coordinator's model).
+
+        Keeps the draft in sync when the model changes outside a save (a
+        service write or a device read), so a later Save doesn't revert it.
+        """
+        self._attr_native_value = value.replace(second=0, microsecond=0)
+        self.async_write_ha_state()
+
     async def async_set_value(self, value: dt_time) -> None:
         self._attr_native_value = value.replace(second=0, microsecond=0)
         self.async_write_ha_state()

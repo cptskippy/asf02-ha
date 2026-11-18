@@ -27,7 +27,7 @@ import logging
 import zlib
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from bleak import BleakError
 from homeassistant.components.bluetooth import BluetoothScanningMode
@@ -65,6 +65,23 @@ from .const import (
 from .managed_client import ManagedClientError, make_client_factory
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class TimeDraft(Protocol):
+    """A slot's time-draft entity: expose its in-memory value and accept a
+    synced value (pushed by the coordinator when the model changes)."""
+
+    def draft_value(self) -> datetime.time: ...
+    def sync_draft(self, value: datetime.time) -> None: ...
+
+
+class PortionDraft(Protocol):
+    """A slot's portion-draft entity: expose its in-memory value and accept a
+    synced value (pushed by the coordinator when the model changes)."""
+
+    def draft_value(self) -> int: ...
+    def sync_draft(self, value: int) -> None: ...
+
 
 # Default poll interval: 15 minutes (see const.OPTION_POLL_MINUTES /
 # coordinator.poll_interval_seconds; options-adjustable 1 min – 1 h). A
@@ -153,8 +170,8 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         # slot's draft from the entity object (in memory) rather than the
         # state machine, where a transiently unavailable state would silently
         # default the slot to disabled on save.
-        self._slot_draft_time: dict[int, Any] = {}
-        self._slot_draft_portion: dict[int, Any] = {}
+        self._slot_draft_time: dict[int, TimeDraft] = {}
+        self._slot_draft_portion: dict[int, PortionDraft] = {}
 
     @property
     def last_feed_at(self) -> datetime.datetime | None:
@@ -417,11 +434,11 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         """Where local_schedule last came from: device_read / last_write / local."""
         return self._schedule_source
 
-    def register_slot_time_draft(self, slot: int, time_entity: Any) -> None:
+    def register_slot_time_draft(self, slot: int, time_entity: TimeDraft) -> None:
         """Register a slot's time-draft entity (called by the time platform)."""
         self._slot_draft_time[slot] = time_entity
 
-    def register_slot_portion_draft(self, slot: int, portion_entity: Any) -> None:
+    def register_slot_portion_draft(self, slot: int, portion_entity: PortionDraft) -> None:
         """Register a slot's portion-draft entity (called by the number platform)."""
         self._slot_draft_portion[slot] = portion_entity
 
