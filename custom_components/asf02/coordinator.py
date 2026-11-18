@@ -138,17 +138,21 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         self._feed_in_progress = 0
         self._last_ad_log_at: float | None = None
         # Local schedule model (Option A): the device's schedule read is
-        # unreliable on in-use firmware, so HA keeps this front-packed copy
-        # (firing slots only) as the source of truth for the Schedule sensor.
-        # See async_save_schedule / async_setup_schedule.
-        self._local_schedule: list[dict[str, Any]] = []
+        # unreliable on in-use firmware, so HA keeps this copy as the source
+        # of truth for the Schedule sensor and for writes. It is positional
+        # — a fixed 10-slot list (index 0 = slot 1), one {hour, minute,
+        # portion, enabled} dict per slot — so a slot's value can be looked
+        # up by position. See async_save_schedule / async_setup_schedule.
+        self._local_schedule: list[dict[str, Any]] = [
+            self._empty_slot() for _ in range(SCHEDULE_SLOTS)
+        ]
         self._schedule_source: str | None = None
         self._schedule_store: store_helper.Store | None = None
         # Draft entities: each slot's time/portion entity registers itself
         # here (via the time/number platforms) so the Save button can read a
         # slot's draft from the entity object (in memory) rather than the
         # state machine, where a transiently unavailable state would silently
-        # default the slot to disabled on save (#24).
+        # default the slot to disabled on save.
         self._slot_draft_time: dict[int, Any] = {}
         self._slot_draft_portion: dict[int, Any] = {}
 
@@ -267,11 +271,9 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             schedule = await client.get_schedule()
             if schedule:
                 # A non-empty read is authoritative device truth; refresh the
-                # local model (slots that actually fire). A silent/empty read
-                # (the known firmware quirk) leaves the model alone.
-                new_model = [
-                    self._plan_entry_dict(e) for e in schedule if e.enabled and e.portion > 0
-                ]
+                # local model (positional). A silent/empty read (the known
+                # firmware quirk) leaves the model alone.
+                new_model = self._positional_model(schedule)
                 if new_model != self._local_schedule:
                     self._local_schedule = new_model
                     self._schedule_source = "device_read"
@@ -398,15 +400,17 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
     # ------------------------------------------------------------------
     @property
     def local_schedule(self) -> list[dict[str, Any]]:
-        """HA's local copy of the schedule: a front-packed list of slot dicts.
+        """The firing slots as a front-packed list of slot dicts.
 
-        Each entry is ``{"hour", "minute", "portion", "enabled"}``. The
-        device's schedule read is unreliable on in-use firmware, so this
-        model is the source of truth for schedule writes; it is refreshed
-        from the device's write-confirmation array after each save and from
-        any non-empty schedule read.
+        Each entry is ``{"hour", "minute", "portion", "enabled"}``. Derived
+        from the positional model: only the slots that actually fire (enabled
+        with a positive portion) are included, in slot order. The device's
+        schedule read is unreliable on in-use firmware, so this model is the
+        source of truth for schedule writes; it is refreshed from the
+        device's write-confirmation array after each save and from any
+        non-empty schedule read.
         """
-        return list(self._local_schedule)
+        return [e for e in self._local_schedule if e["enabled"] and e["portion"] > 0]
 
     @property
     def schedule_source(self) -> str | None:
@@ -459,16 +463,11 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             return
         if not isinstance(data, dict):
             return
+        # The model is a positional 10-slot list; reject anything else (e.g.,
+        # the pre-positional front-packed store) and keep the empty model.
         schedule = data.get("schedule")
-        if isinstance(schedule, list):
-            self._local_schedule = [
-                e
-                for e in schedule
-                if isinstance(e, dict)
-                and isinstance(e.get("hour"), int)
-                and isinstance(e.get("minute"), int)
-                and isinstance(e.get("portion"), int)
-            ]
+        if isinstance(schedule, list) and self._is_positional_model(schedule):
+            self._local_schedule = schedule
         source = data.get("source")
         if source in ("device_read", "last_write", "local"):
             self._schedule_source = source
@@ -482,6 +481,11 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         )
 
     @staticmethod
+    def _empty_slot() -> dict[str, Any]:
+        """A canonical empty/disabled slot (08:00, 0 portions, disabled)."""
+        return {"hour": 8, "minute": 0, "portion": 0, "enabled": False}
+
+    @staticmethod
     def _plan_entry_dict(entry: PlanEntry) -> dict[str, Any]:
         """Normalize a PlanEntry (from get_schedule) into a model entry."""
         return {
@@ -492,28 +496,56 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         }
 
     @staticmethod
-    def _decode_plan_array(slots: list) -> list[dict[str, Any]]:
-        """Decode the device's confirmed slot array (10-char hex strings).
+    def _decode_one_slot(raw: Any) -> PlanEntry | None:
+        """Decode one positional slot into a PlanEntry.
 
-        Keeps only the slots that actually fire (enabled with a positive
-        portion count); empty/clear-marker and disabled slots are dropped.
+        A PlanEntry (from a device read) passes through; a hex string (from a
+        write confirmation) is decoded; anything else (None, a clear marker)
+        is empty.
         """
-        entries: list[dict[str, Any]] = []
-        for slot in slots:
-            if not isinstance(slot, str):
-                continue
-            entry = decode_plan_slot(slot)
-            if entry is None or not (entry.enabled and entry.portion > 0):
-                continue
-            entries.append(
-                {
-                    "hour": entry.hour,
-                    "minute": entry.minute,
-                    "portion": entry.portion,
-                    "enabled": entry.enabled,
-                }
+        if isinstance(raw, PlanEntry):
+            return raw
+        if isinstance(raw, str):
+            return decode_plan_slot(raw)
+        return None
+
+    def _positional_model(self, slots: list) -> list[dict[str, Any]]:
+        """Build the positional 10-slot model from a positional slot list.
+
+        ``slots`` has one entry per slot (index 0 = slot 1): a PlanEntry (from
+        a device read) or a hex string (from a write confirmation). Each slot
+        keeps its actual values; a missing/None slot becomes the canonical
+        empty slot. The result always has exactly SCHEDULE_SLOTS entries, so
+        a slot's value can be looked up by position.
+        """
+        model: list[dict[str, Any]] = []
+        for i in range(SCHEDULE_SLOTS):
+            raw = slots[i] if i < len(slots) else None
+            entry = self._decode_one_slot(raw)
+            if entry is None:
+                model.append(self._empty_slot())
+            else:
+                model.append(self._plan_entry_dict(entry))
+        return model
+
+    @staticmethod
+    def _is_positional_model(schedule: Any) -> bool:
+        """True if ``schedule`` is a valid positional 10-slot model.
+
+        Used to reject the pre-positional (front-packed) stores on load.
+        """
+        return (
+            isinstance(schedule, list)
+            and len(schedule) == SCHEDULE_SLOTS
+            and all(
+                isinstance(e, dict)
+                and isinstance(e.get("hour"), int)
+                and isinstance(e.get("minute"), int)
+                and isinstance(e.get("portion"), int)
+                and isinstance(e.get("enabled"), bool)
+                for e in schedule
             )
-        return entries
+        )
 
     async def _apply_schedule_confirmation(self, confirmation: list) -> None:
         """Refresh the local model from a device-confirmed slot array.
@@ -523,7 +555,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         and refresh the entities that read it (the Schedule sensor) so the new
         schedule shows up now instead of on the next poll.
         """
-        self._local_schedule = self._decode_plan_array(confirmation)
+        self._local_schedule = self._positional_model(confirmation)
         self._schedule_source = "last_write"
         await self._persist_schedule()
         # The model changed outside a poll: refresh the entities that read
