@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 from asf02.protocol import encode_plan_entry
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.asf02.coordinator import ASF02Coordinator
@@ -178,12 +179,13 @@ async def test_clear_schedule_wipes_device_and_model(hass, entry, patched_client
 
 
 async def test_missing_draft_slot_defaults_to_disabled(hass, entry, patched_client, fake_state):
-    """A removed draft entity defaults its slot to disabled (save still works)."""
+    """A removed draft entity makes its slot empty (save still works)."""
     await _make_available(hass, entry, patched_client)
     entities = _entities_by_key(hass, entry)
 
-    # Remove slot 1's portions entity; its time stays. Slot 1 should save as
-    # disabled (0 portions) rather than failing the whole save.
+    # Remove slot 1's portions entity; its time stays. With a missing draft
+    # the slot saves as empty (not a stale value) rather than failing the
+    # whole save.
     registry = er.async_get(hass)
     registry.async_remove(entities["slot_portions"])
     await hass.async_block_till_done(wait_background_tasks=True)
@@ -191,11 +193,38 @@ async def test_missing_draft_slot_defaults_to_disabled(hass, entry, patched_clie
     await _set_draft(hass, entities, 1, "07:00:00", 5)  # time set, portions entity gone
     await _press_save(hass, entities)
 
-    # Slot 1 written with its time but 0 portions / disabled.
-    assert fake_state.schedule[0] == encode_plan_entry(7, 0, 0, False)
+    # Slot 1 written empty (its portions draft was removed).
+    assert fake_state.schedule[0] == encode_plan_entry(0, 0, 0, False)
     # No firing slots, so the model is empty.
     coordinator = entry.runtime_data
     assert coordinator.local_schedule == []
+
+
+async def test_save_preserves_draft_when_entity_unavailable(
+    hass, entry, patched_client, fake_state
+):
+    """A slot's draft is preserved on save even when its draft entities'
+    states go unavailable, so a save can't silently zero a slot.
+
+    The drafts live in the entity objects (in memory), not the state machine,
+    so a transiently unavailable state no longer collapses a slot to disabled.
+    """
+    coordinator = await _make_available(hass, entry, patched_client)
+    entities = _entities_by_key(hass, entry)
+
+    # The user sets slot 1's draft (time + portion).
+    await _set_draft(hass, entities, 1, "07:30:00", 4)
+
+    # Simulate the slot's draft entities' states going unavailable (the
+    # hazard #24 describes). The drafts survive in the entity objects.
+    for key in ("slot_time", "slot_portions"):
+        hass.states.async_set(entities[key], STATE_UNAVAILABLE)
+
+    await _press_save(hass, entities)
+
+    # Slot 1 saved with its draft (07:30 x4), not zeroed to disabled.
+    assert fake_state.schedule[0] == encode_plan_entry(7, 30, 4, True)
+    assert coordinator.local_schedule == [{"hour": 7, "minute": 30, "portion": 4, "enabled": True}]
 
 
 async def test_save_schedule_validation(hass, entry, patched_client, fake_state):

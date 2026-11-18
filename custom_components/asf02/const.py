@@ -35,7 +35,11 @@ DEFAULT_SCHEDULE_PORTION = 0
 # unreliable on in-use firmware, so HA keeps a local copy of the schedule
 # (the source of truth for writes) and refreshes it from write
 # confirmations and any non-empty reads.
-SCHEDULE_STORE_VERSION = 1
+#
+# Version 2: the model is positional (a fixed 10-slot list) instead of
+# front-packed, so a slot's value can be looked up by position. The old
+# front-packed stores are rejected on load (see _is_positional_model).
+SCHEDULE_STORE_VERSION = 2
 
 # Mid-feed feed() polling / completion-wait tuning.
 FEED_SECONDS_PER_PORTION = 5.1  # measured 2026-09-18

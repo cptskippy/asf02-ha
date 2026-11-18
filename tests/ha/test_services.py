@@ -75,6 +75,69 @@ async def test_set_schedule_service(hass, entry, patched_client, fake_state):
     assert fake_state.schedule[2:] == [""] * 8
 
 
+async def test_set_schedule_service_updates_local_model(hass, entry, patched_client, fake_state):
+    """The set_schedule service refreshes the local model so the slot
+    entities reflect the new schedule immediately, not on the next poll."""
+    await _ready(hass, entry, patched_client)
+    coordinator = entry.runtime_data
+    entity_id = _entities_by_key(hass, entry)["feed_count"]
+
+    await hass.services.async_call(
+        const.DOMAIN,
+        "set_schedule",
+        {
+            "entity_id": entity_id,
+            "entries": [
+                {"time": "07:30", "portion": 2},
+                {"time": "18:00", "portion": 3, "enabled": False},
+            ],
+        },
+        blocking=True,
+    )
+
+    # The model now matches the write: only the firing slot is kept, and it
+    # is attributed to this write (not a device read).
+    assert coordinator.local_schedule == [{"hour": 7, "minute": 30, "portion": 2, "enabled": True}]
+    assert coordinator.schedule_source == "last_write"
+
+
+async def test_set_schedule_service_portion_range(hass, entry, patched_client, fake_state):
+    """The set_schedule service accepts the editor's portion range (0-99),
+    not the old 1-9 limit."""
+    import probatio
+
+    await _ready(hass, entry, patched_client)
+    entity_id = _entities_by_key(hass, entry)["feed_count"]
+
+    # 50 was rejected by the old max=9; it is accepted now.
+    await hass.services.async_call(
+        const.DOMAIN,
+        "set_schedule",
+        {"entity_id": entity_id, "entries": [{"time": "07:30", "portion": 50}]},
+        blocking=True,
+    )
+    assert fake_state.schedule[0] == "00071e3201"
+
+    # 0 is now a valid portion and implies a disabled slot (matching the
+    # editor), even though enabled defaults to true.
+    await hass.services.async_call(
+        const.DOMAIN,
+        "set_schedule",
+        {"entity_id": entity_id, "entries": [{"time": "08:00", "portion": 0}]},
+        blocking=True,
+    )
+    assert fake_state.schedule[0] == "0008000000"
+
+    # 100 still exceeds the 0-99 range and is rejected by the schema.
+    with pytest.raises(probatio.Invalid):
+        await hass.services.async_call(
+            const.DOMAIN,
+            "set_schedule",
+            {"entity_id": entity_id, "entries": [{"time": "07:30", "portion": 100}]},
+            blocking=True,
+        )
+
+
 async def test_clear_schedule_service(hass, entry, patched_client, fake_state):
     await _ready(hass, entry, patched_client)
     entity_id = _entities_by_key(hass, entry)["feed_count"]
@@ -117,5 +180,39 @@ async def test_service_rejects_non_asf02_entity(hass, entry, patched_client, fak
             const.DOMAIN,
             "feed",
             {"entity_id": "light.nonexistent_entity", "portions": 1},
+            blocking=True,
+        )
+
+
+def test_managed_client_error_is_a_bleak_error():
+    """ManagedClientError subclasses BleakError so the standard
+    connection-error handlers catch it."""
+    from bleak import BleakError
+
+    from custom_components.asf02.managed_client import ManagedClientError
+
+    assert issubclass(ManagedClientError, BleakError)
+    assert isinstance(ManagedClientError("AA:BB:CC:DD:EE:FF"), BleakError)
+
+
+async def test_feed_service_converts_managed_client_error(hass, entry, patched_client, monkeypatch):
+    """A ManagedClientError from the radio surfaces as a friendly
+    HomeAssistantError, not a raw traceback."""
+    from custom_components.asf02.managed_client import ManagedClientError
+
+    await _ready(hass, entry, patched_client)
+    coordinator = entry.runtime_data
+    entity_id = _entities_by_key(hass, entry)["feed_count"]
+
+    async def raise_managed(_portions, wait=False):
+        raise ManagedClientError(coordinator.address)
+
+    monkeypatch.setattr(coordinator, "async_feed", raise_managed)
+
+    with pytest.raises(HomeAssistantError, match="feed failed"):
+        await hass.services.async_call(
+            const.DOMAIN,
+            "feed",
+            {"entity_id": entity_id, "portions": 1},
             blocking=True,
         )

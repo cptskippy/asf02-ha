@@ -54,13 +54,36 @@ class ASF02SlotTimeEntity(ASF02CoordinatorEntity, RestoreEntity, TimeEntity):
         """Restore the last-used time across restarts."""
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
-        if last_state is None or last_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return
-        try:
-            parsed = dt_time.fromisoformat(last_state.state)
-        except ValueError:
-            return
-        self._attr_native_value = parsed.replace(second=0, microsecond=0)
+        if last_state is not None and last_state.state not in (
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
+        ):
+            try:
+                parsed = dt_time.fromisoformat(last_state.state)
+                self._attr_native_value = parsed.replace(second=0, microsecond=0)
+            except ValueError:
+                pass
+        # Register with the coordinator so the Save button can read this slot's
+        # draft from the entity object (in memory), not the state machine.
+        self.coordinator.register_slot_time_draft(self._slot, self)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Deregister the draft when the entity is removed, so a removed
+        entity doesn't leave a stale value the coordinator would still save."""
+        self.coordinator.deregister_slot_time_draft(self._slot)
+
+    def draft_value(self) -> dt_time:
+        """The slot's draft time (the entity's in-memory value)."""
+        return self._attr_native_value
+
+    def sync_draft(self, value: dt_time) -> None:
+        """Push a synced time into the draft (from the coordinator's model).
+
+        Keeps the draft in sync when the model changes outside a save (a
+        service write or a device read), so a later Save doesn't revert it.
+        """
+        self._attr_native_value = value.replace(second=0, microsecond=0)
+        self.async_write_ha_state()
 
     async def async_set_value(self, value: dt_time) -> None:
         self._attr_native_value = value.replace(second=0, microsecond=0)

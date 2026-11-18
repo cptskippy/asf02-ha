@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import time as dt_time
 
 from bleak import BleakError
 from homeassistant.components.button import ButtonEntity
@@ -125,10 +124,14 @@ class ASF02RefreshButton(ASF02Button):
 class ASF02SaveScheduleButton(ASF02Button):
     """Commit every slot's time + portion drafts to the feeder's schedule.
 
-    Reads the 20 draft entities (Slot N time, Slot N portions) from the
-    state machine and writes the full positional 10-slot schedule. A slot
-    whose portion count is 0 is written as disabled. The device's
-    write-confirmation array becomes the new local model.
+    Reads each slot's draft via the coordinator (from the draft entity
+    objects in memory, not the state machine) and writes the full positional
+    10-slot schedule. A slot whose portion count is 0 is written as disabled,
+    and a slot with no draft (its entity removed, or platform setup not
+    complete) is written empty. Reading from the entity objects — not the
+    state machine — means a transiently unavailable state can't silently zero
+    a slot on save. The device's write-confirmation array becomes the new
+    local model.
     """
 
     _attr_entity_category = EntityCategory.CONFIG
@@ -139,56 +142,22 @@ class ASF02SaveScheduleButton(ASF02Button):
             coordinator, entry, translation_key="save_schedule", unique_key="save_schedule"
         )
 
-    @staticmethod
-    def _slot_keys(slot: int) -> tuple[str, str]:
-        """(time unique_key, portions unique_key) for a slot. Slot 1 keeps
-        its pre-0.2.0 keys so existing entities are still found."""
-        time_key = "slot_time" if slot == 1 else f"slot_{slot}_time"
-        portion_key = "slot_portions" if slot == 1 else f"slot_{slot}_portions"
-        return time_key, portion_key
-
-    def _draft_slot(self, slot: int) -> tuple[int, int, int]:
-        """(hour, minute, portion) for one slot.
-
-        A missing or unavailable draft entity defaults to 08:00 and 0
-        portions (disabled), so saving always works even if some slot
-        entities have been removed from the registry.
-        """
-        registry = er.async_get(self.hass)
-        address = self.coordinator.address
-        time_key, portion_key = self._slot_keys(slot)
-        hour, minute = 8, 0
-        portion = 0
-        time_id = registry.async_get_entity_id("time", DOMAIN, f"{address}_{time_key}")
-        time_state = self.hass.states.get(time_id) if time_id else None
-        if time_state is not None and time_state.state not in (
-            STATE_UNAVAILABLE,
-            STATE_UNKNOWN,
-        ):
-            try:
-                parsed = dt_time.fromisoformat(time_state.state)
-                hour, minute = parsed.hour, parsed.minute
-            except ValueError:
-                pass
-        portion_id = registry.async_get_entity_id("number", DOMAIN, f"{address}_{portion_key}")
-        portion_state = self.hass.states.get(portion_id) if portion_id else None
-        if portion_state is not None and portion_state.state not in (
-            STATE_UNAVAILABLE,
-            STATE_UNKNOWN,
-        ):
-            try:
-                portion = int(float(portion_state.state))
-            except ValueError:
-                portion = 0
-        return hour, minute, portion
-
     def _entries(self) -> list[tuple[int, int, int, bool]]:
-        return [
-            (hour, minute, portion, portion > 0)
-            for hour, minute, portion in (
-                self._draft_slot(slot) for slot in range(1, SCHEDULE_SLOTS + 1)
-            )
-        ]
+        """Build the full 10-slot schedule from the slot drafts.
+
+        A slot with no draft (the user removed the entity, or platform setup
+        is incomplete) is written empty rather than given an arbitrary
+        default.
+        """
+        entries: list[tuple[int, int, int, bool]] = []
+        for slot in range(1, SCHEDULE_SLOTS + 1):
+            draft = self.coordinator.draft_slot(slot)
+            if draft is None:
+                entries.append((0, 0, 0, False))
+            else:
+                hour, minute, portion = draft
+                entries.append((hour, minute, portion, portion > 0))
+        return entries
 
     async def async_press(self) -> None:
         try:

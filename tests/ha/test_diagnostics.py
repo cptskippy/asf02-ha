@@ -37,3 +37,21 @@ async def test_diagnostics_with_snapshot(hass, entry, patched_client, fake_state
     assert snap["feed_count"] == 42
     assert snap["battery_raw"] == 522
     assert snap["source"] == "local:00:11:22:33:44:55"
+
+
+async def test_diagnostics_does_not_include_token(hass, entry, patched_client, fake_state):
+    """The diagnostics output must not contain the pairing token.
+
+    People paste diagnostics into public issues; the token would let a
+    stranger unlock and drive the feeder. The coordinator's cached snapshot
+    is safe to share, but the entry's secret token is not.
+    """
+    import json
+
+    coordinator = await _setup(hass, entry, patched_client)
+    fire_advertisement(hass)
+    await poll_once(hass, coordinator)
+
+    token = entry.data[const.CONF_TOKEN]
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert token not in json.dumps(diag)

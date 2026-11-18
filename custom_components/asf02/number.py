@@ -116,12 +116,34 @@ class ASF02SlotPortionNumber(ASF02CoordinatorEntity, RestoreEntity, NumberEntity
         """Restore the last-used value across restarts."""
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
-        if last_state is None or last_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return
-        try:
-            self._attr_native_value = _clamp_schedule_portion(float(last_state.state))
-        except ValueError:
-            pass
+        if last_state is not None and last_state.state not in (
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
+        ):
+            try:
+                self._attr_native_value = _clamp_schedule_portion(float(last_state.state))
+            except ValueError:
+                pass
+        # Register with the coordinator so the Save button can read this slot's
+        # draft from the entity object (in memory), not the state machine.
+        self.coordinator.register_slot_portion_draft(self._slot, self)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Deregister the draft when the entity is removed, so a removed
+        entity doesn't leave a stale value the coordinator would still save."""
+        self.coordinator.deregister_slot_portion_draft(self._slot)
+
+    def draft_value(self) -> int:
+        """The slot's draft portion count (the entity's in-memory value)."""
+        return int(self._attr_native_value)
+
+    def sync_draft(self, value: int) -> None:
+        """Push a synced portion count into the draft (from the coordinator's
+        model). Keeps the draft in sync when the model changes outside a save
+        (a service write or a device read), so a later Save doesn't revert it.
+        """
+        self._attr_native_value = _clamp_schedule_portion(value)
+        self.async_write_ha_state()
 
     async def async_set_native_value(self, value: float) -> None:
         self._attr_native_value = _clamp_schedule_portion(value)

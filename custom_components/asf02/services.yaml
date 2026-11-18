@@ -44,7 +44,8 @@ set_schedule:
     Replace the entire 10-slot schedule. The write response (the
     device-confirmed slot array) is the authoritative confirmation.
     Requires `entries`: a list of up to 10 objects, each with `time`
-    ("HH:MM"), `portion` (1-9), and optional `enabled` (bool). This field
+    ("HH:MM"), `portion` (0-99; 0 disables the slot), and optional
+    `enabled` (bool, default true — ignored when portion is 0). This field
     is best supplied from a script or automation, e.g.
     entries: [{time: "08:00", portion: 2}, {time: "18:00", portion: 1}].
   fields:

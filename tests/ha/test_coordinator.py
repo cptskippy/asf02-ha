@@ -127,10 +127,48 @@ async def test_feed_in_progress_blocks_polls(hass, entry, patched_client, fake_s
     assert fake_state.connect_count == 1
 
     # A feed in progress blocks the timer-driven poll.
-    coordinator._feed_in_progress = True
+    coordinator._feed_in_progress = 1
     coordinator._last_poll = None
     await poll_once(hass, coordinator)
     assert fake_state.connect_count == 1
+
+
+async def test_feed_in_progress_counter_survives_overlapping_feeds(
+    hass, entry, patched_client, fake_state
+):
+    """Overlapping async_feed calls keep _feed_in_progress > 0 until all
+    finish.
+
+    The flag is a counter, not a bool: with two feeds queued behind the
+    session lock, the first feed's finally must not clear the flag while the
+    second is still pending (which would let a poll/refresh misfire).
+    """
+    import asyncio
+
+    coordinator = await _setup(hass, entry, patched_client)
+    fire_advertisement(hass)
+    await poll_once(hass, coordinator)
+
+    # Hold the session lock and queue two async_feed calls behind it.
+    async with coordinator._session_lock:
+        feed_a = asyncio.create_task(coordinator.async_feed(2))
+        await asyncio.sleep(0)  # feed_a starts: increments, waits on the lock
+        assert coordinator._feed_in_progress == 1
+        feed_b = asyncio.create_task(coordinator.async_feed(3))
+        await asyncio.sleep(0)  # feed_b starts: counter is now 2
+        assert coordinator._feed_in_progress == 2
+
+        # Cancel feed_a: its finally decrements, but feed_b is still pending
+        # behind the lock, so the counter stays > 0. (An old bool would have
+        # dropped to 0 here.)
+        feed_a.cancel()
+        await asyncio.gather(feed_a, return_exceptions=True)
+        assert coordinator._feed_in_progress == 1
+
+        # Cancel feed_b to balance the counter back to 0.
+        feed_b.cancel()
+        await asyncio.gather(feed_b, return_exceptions=True)
+    assert coordinator._feed_in_progress == 0
 
 
 async def test_feed_event_fires_on_counter_increment(hass, entry, patched_client, fake_state):
@@ -192,3 +230,58 @@ async def test_failed_poll_keeps_previous_data(hass, entry, patched_client):
     await coordinator._async_poll()
     assert coordinator.data is before
     assert coordinator.last_poll_successful is False
+
+
+async def test_device_time_uses_ha_time_zone(hass, entry, patched_client):
+    """_device_time follows HA's configured timezone, not the host's.
+
+    The host runs UTC; the old ``.astimezone()`` would return UTC here. With
+    HA's timezone set to America/Los_Angeles, the result must be in that zone.
+    """
+    import datetime
+
+    import homeassistant.util.dt as dt_util
+
+    coordinator = await _setup(hass, entry, patched_client)
+    fire_advertisement(hass)
+    await poll_once(hass, coordinator)
+
+    # Switch HA's timezone for the call and restore it in the body (not via
+    # monkeypatch): the hass fixture's teardown asserts DEFAULT_TIME_ZONE is
+    # UTC, and monkeypatch's finalizer can run after that check has passed.
+    tz = dt_util.get_time_zone("America/Los_Angeles")
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(tz)
+    try:
+        # 1700000000 = 2023-11-14 22:13:20 UTC = 14:13:20 PST (LA).
+        result = coordinator._device_time({"t": 1700000000})
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+    assert result is not None
+    assert result.tzinfo == tz
+    assert result == datetime.datetime(2023, 11, 14, 14, 13, 20, tzinfo=tz)
+
+
+async def test_set_schedule_syncs_slot_drafts(hass, entry, patched_client):
+    """A service set_schedule updates the model AND the slot drafts.
+
+    Before the fix, set_schedule updated only the model, leaving the drafts
+    stale; a later Save (which reads the drafts) would silently revert the
+    write.
+    """
+    import datetime
+
+    coordinator = await _setup(hass, entry, patched_client)
+    fire_advertisement(hass)
+    await poll_once(hass, coordinator)
+
+    # The slot 1 drafts, registered by the time/number platforms.
+    time_draft = coordinator._slot_draft_time[1]
+    portion_draft = coordinator._slot_draft_portion[1]
+
+    # Write slot 1 = 18:00 x2 via the service path (the client pads to 10).
+    await coordinator.async_set_schedule([(18, 0, 2, True)])
+
+    # The drafts now reflect the write, not their previous values.
+    assert time_draft.draft_value() == datetime.time(18, 0)
+    assert portion_draft.draft_value() == 2
