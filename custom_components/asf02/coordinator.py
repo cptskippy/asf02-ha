@@ -288,12 +288,14 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             schedule = await client.get_schedule()
             if schedule:
                 # A non-empty read is authoritative device truth; refresh the
-                # local model (positional). A silent/empty read (the known
-                # firmware quirk) leaves the model alone.
+                # local model (positional) and sync the slot drafts. A
+                # silent/empty read (the known firmware quirk) leaves the
+                # model (and drafts) alone.
                 new_model = self._positional_model(schedule)
                 if new_model != self._local_schedule:
                     self._local_schedule = new_model
                     self._schedule_source = "device_read"
+                    self._sync_slot_drafts()
 
         battery_raw = int(status.get("b", 0))
         snapshot = FeederSnapshot(
@@ -462,6 +464,23 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
             portion = int(portion_entity.draft_value())
         return hour, minute, portion
 
+    def _sync_slot_drafts(self) -> None:
+        """Push the positional model into the slot draft entities.
+
+        Keeps the drafts in sync when the model changes outside a save (a
+        service write or a device read), so a later Save — which reads the
+        drafts — doesn't revert the change. Only registered drafts are
+        updated; a missing draft is left for the draft_slot fallback.
+        """
+        for i, entry in enumerate(self._local_schedule):
+            slot = i + 1
+            time_entity = self._slot_draft_time.get(slot)
+            if time_entity is not None:
+                time_entity.sync_draft(datetime.time(entry["hour"], entry["minute"]))
+            portion_entity = self._slot_draft_portion.get(slot)
+            if portion_entity is not None:
+                portion_entity.sync_draft(entry["portion"])
+
     def _schedule_store_key(self) -> str:
         return f"asf02_{self.address.lower().replace(':', '')}"
 
@@ -576,8 +595,10 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         self._schedule_source = "last_write"
         await self._persist_schedule()
         # The model changed outside a poll: refresh the entities that read
-        # it (the Schedule sensor) so the new schedule shows up now.
+        # it (the Schedule sensor) so the new schedule shows up now, and sync
+        # the slot drafts so a later Save doesn't revert the change.
         self.async_update_listeners()
+        self._sync_slot_drafts()
 
     async def async_save_schedule(self, entries: list[tuple[int, int, int, bool]]) -> list:
         """Write the full 10-slot schedule (positional) to the feeder.

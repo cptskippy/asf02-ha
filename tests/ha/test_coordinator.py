@@ -260,3 +260,28 @@ async def test_device_time_uses_ha_time_zone(hass, entry, patched_client):
     assert result is not None
     assert result.tzinfo == tz
     assert result == datetime.datetime(2023, 11, 14, 14, 13, 20, tzinfo=tz)
+
+
+async def test_set_schedule_syncs_slot_drafts(hass, entry, patched_client):
+    """A service set_schedule updates the model AND the slot drafts.
+
+    Before the fix, set_schedule updated only the model, leaving the drafts
+    stale; a later Save (which reads the drafts) would silently revert the
+    write.
+    """
+    import datetime
+
+    coordinator = await _setup(hass, entry, patched_client)
+    fire_advertisement(hass)
+    await poll_once(hass, coordinator)
+
+    # The slot 1 drafts, registered by the time/number platforms.
+    time_draft = coordinator._slot_draft_time[1]
+    portion_draft = coordinator._slot_draft_portion[1]
+
+    # Write slot 1 = 18:00 x2 via the service path (the client pads to 10).
+    await coordinator.async_set_schedule([(18, 0, 2, True)])
+
+    # The drafts now reflect the write, not their previous values.
+    assert time_draft.draft_value() == datetime.time(18, 0)
+    assert portion_draft.draft_value() == 2
