@@ -67,6 +67,11 @@ class ASF02SlotTimeEntity(ASF02CoordinatorEntity, RestoreEntity, TimeEntity):
         # draft from the entity object (in memory), not the state machine (#24).
         self.coordinator.register_slot_time_draft(self._slot, self)
 
+    async def async_will_remove_from_hass(self) -> None:
+        """Deregister the draft when the entity is removed, so a removed
+        entity doesn't leave a stale value the coordinator would still save."""
+        self.coordinator.deregister_slot_time_draft(self._slot)
+
     def draft_value(self) -> dt_time:
         """The slot's draft time (the entity's in-memory value)."""
         return self._attr_native_value

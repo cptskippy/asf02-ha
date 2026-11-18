@@ -126,10 +126,12 @@ class ASF02SaveScheduleButton(ASF02Button):
 
     Reads each slot's draft via the coordinator (from the draft entity
     objects in memory, not the state machine) and writes the full positional
-    10-slot schedule. A slot whose portion count is 0 is written as disabled.
-    Reading from the entity objects — not the state machine — means a
-    transiently unavailable state can't silently zero a slot on save (#24).
-    The device's write-confirmation array becomes the new local model.
+    10-slot schedule. A slot whose portion count is 0 is written as disabled,
+    and a slot with no draft (its entity removed, or platform setup not
+    complete) is written empty. Reading from the entity objects — not the
+    state machine — means a transiently unavailable state can't silently zero
+    a slot on save. The device's write-confirmation array becomes the new
+    local model.
     """
 
     _attr_entity_category = EntityCategory.CONFIG
@@ -141,12 +143,21 @@ class ASF02SaveScheduleButton(ASF02Button):
         )
 
     def _entries(self) -> list[tuple[int, int, int, bool]]:
-        return [
-            (hour, minute, portion, portion > 0)
-            for hour, minute, portion in (
-                self.coordinator.draft_slot(slot) for slot in range(1, SCHEDULE_SLOTS + 1)
-            )
-        ]
+        """Build the full 10-slot schedule from the slot drafts.
+
+        A slot with no draft (the user removed the entity, or platform setup
+        is incomplete) is written empty rather than given an arbitrary
+        default.
+        """
+        entries: list[tuple[int, int, int, bool]] = []
+        for slot in range(1, SCHEDULE_SLOTS + 1):
+            draft = self.coordinator.draft_slot(slot)
+            if draft is None:
+                entries.append((0, 0, 0, False))
+            else:
+                hour, minute, portion = draft
+                entries.append((hour, minute, portion, portion > 0))
+        return entries
 
     async def async_press(self) -> None:
         try:

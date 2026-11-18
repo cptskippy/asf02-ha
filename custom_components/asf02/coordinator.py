@@ -444,25 +444,32 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         """Register a slot's portion-draft entity (called by the number platform)."""
         self._slot_draft_portion[slot] = portion_entity
 
-    def draft_slot(self, slot: int) -> tuple[int, int, int]:
-        """(hour, minute, portion) for a slot's draft.
+    def deregister_slot_time_draft(self, slot: int) -> None:
+        """Remove a slot's time-draft entity (called on entity removal)."""
+        self._slot_draft_time.pop(slot, None)
+
+    def deregister_slot_portion_draft(self, slot: int) -> None:
+        """Remove a slot's portion-draft entity (called on entity removal)."""
+        self._slot_draft_portion.pop(slot, None)
+
+    def draft_slot(self, slot: int) -> tuple[int, int, int] | None:
+        """(hour, minute, portion) for a slot's draft, or None if the slot's
+        draft entities are not present.
 
         Reads the slot's draft entities from the entity objects (in memory),
         not the state machine, so a transiently unavailable state can't
-        silently zero a slot on save (#24). Falls back to 08:00 / 0 portions
-        only when the slot's draft entities were never registered (platform
-        setup not complete).
+        silently zero a slot on save. Returns None when the drafts were never
+        registered (platform setup incomplete) or were deregistered (the user
+        removed the entities); a save then writes an empty slot rather than an
+        arbitrary default.
         """
         time_entity = self._slot_draft_time.get(slot)
         portion_entity = self._slot_draft_portion.get(slot)
-        hour = minute = 8
-        portion = 0
-        if time_entity is not None:
-            value = time_entity.draft_value()
-            hour, minute = value.hour, value.minute
-        if portion_entity is not None:
-            portion = int(portion_entity.draft_value())
-        return hour, minute, portion
+        if time_entity is None or portion_entity is None:
+            return None
+        value = time_entity.draft_value()
+        portion = int(portion_entity.draft_value())
+        return value.hour, value.minute, portion
 
     def _sync_slot_drafts(self) -> None:
         """Push the positional model into the slot draft entities.
