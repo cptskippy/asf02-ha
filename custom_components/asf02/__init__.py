@@ -162,7 +162,8 @@ async def _async_set_schedule(service: ServiceCall) -> None:
             _parse_time(item["time"])[0],
             _parse_time(item["time"])[1],
             item["portion"],
-            item["enabled"],
+            # A zero-portion slot is disabled, like the slot editor.
+            item["enabled"] and item["portion"] > 0,
         )
         for item in raw_entries
     ]

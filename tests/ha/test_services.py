@@ -118,14 +118,15 @@ async def test_set_schedule_service_portion_range(hass, entry, patched_client, f
     )
     assert fake_state.schedule[0] == "00071e3201"
 
-    # 0 is now a valid (disabled-slot) portion, matching the editor.
+    # 0 is now a valid portion and implies a disabled slot (matching the
+    # editor), even though enabled defaults to true.
     await hass.services.async_call(
         const.DOMAIN,
         "set_schedule",
         {"entity_id": entity_id, "entries": [{"time": "08:00", "portion": 0}]},
         blocking=True,
     )
-    assert fake_state.schedule[0] == "0008000001"
+    assert fake_state.schedule[0] == "0008000000"
 
     # 100 still exceeds the 0-99 range and is rejected by the schema.
     with pytest.raises(probatio.Invalid):
