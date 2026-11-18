@@ -137,7 +137,7 @@ async def test_feed_in_progress_counter_survives_overlapping_feeds(
     hass, entry, patched_client, fake_state
 ):
     """Overlapping async_feed calls keep _feed_in_progress > 0 until all
-    finish (#25).
+    finish.
 
     The flag is a counter, not a bool: with two feeds queued behind the
     session lock, the first feed's finally must not clear the flag while the
@@ -233,7 +233,7 @@ async def test_failed_poll_keeps_previous_data(hass, entry, patched_client):
 
 
 async def test_device_time_uses_ha_time_zone(hass, entry, patched_client):
-    """_device_time follows HA's configured timezone, not the host's (#27).
+    """_device_time follows HA's configured timezone, not the host's.
 
     The host runs UTC; the old ``.astimezone()`` would return UTC here. With
     HA's timezone set to America/Los_Angeles, the result must be in that zone.

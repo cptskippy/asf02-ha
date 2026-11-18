@@ -40,7 +40,7 @@ async def test_diagnostics_with_snapshot(hass, entry, patched_client, fake_state
 
 
 async def test_diagnostics_does_not_include_token(hass, entry, patched_client, fake_state):
-    """The diagnostics output must not contain the pairing token (#23).
+    """The diagnostics output must not contain the pairing token.
 
     People paste diagnostics into public issues; the token would let a
     stranger unlock and drive the feeder. The coordinator's cached snapshot

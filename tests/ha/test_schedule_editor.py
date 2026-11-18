@@ -204,7 +204,7 @@ async def test_save_preserves_draft_when_entity_unavailable(
     hass, entry, patched_client, fake_state
 ):
     """A slot's draft is preserved on save even when its draft entities'
-    states go unavailable, so a save can't silently zero a slot (#24).
+    states go unavailable, so a save can't silently zero a slot.
 
     The drafts live in the entity objects (in memory), not the state machine,
     so a transiently unavailable state no longer collapses a slot to disabled.

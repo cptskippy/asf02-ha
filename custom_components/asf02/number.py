@@ -125,7 +125,7 @@ class ASF02SlotPortionNumber(ASF02CoordinatorEntity, RestoreEntity, NumberEntity
             except ValueError:
                 pass
         # Register with the coordinator so the Save button can read this slot's
-        # draft from the entity object (in memory), not the state machine (#24).
+        # draft from the entity object (in memory), not the state machine.
         self.coordinator.register_slot_portion_draft(self._slot, self)
 
     async def async_will_remove_from_hass(self) -> None:

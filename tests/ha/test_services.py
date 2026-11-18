@@ -77,7 +77,7 @@ async def test_set_schedule_service(hass, entry, patched_client, fake_state):
 
 async def test_set_schedule_service_updates_local_model(hass, entry, patched_client, fake_state):
     """The set_schedule service refreshes the local model so the slot
-    entities reflect the new schedule immediately, not on the next poll (#21)."""
+    entities reflect the new schedule immediately, not on the next poll."""
     await _ready(hass, entry, patched_client)
     coordinator = entry.runtime_data
     entity_id = _entities_by_key(hass, entry)["feed_count"]
@@ -103,7 +103,7 @@ async def test_set_schedule_service_updates_local_model(hass, entry, patched_cli
 
 async def test_set_schedule_service_portion_range(hass, entry, patched_client, fake_state):
     """The set_schedule service accepts the editor's portion range (0-99),
-    not the old 1-9 limit (#22)."""
+    not the old 1-9 limit."""
     import probatio
 
     await _ready(hass, entry, patched_client)
@@ -186,7 +186,7 @@ async def test_service_rejects_non_asf02_entity(hass, entry, patched_client, fak
 
 def test_managed_client_error_is_a_bleak_error():
     """ManagedClientError subclasses BleakError so the standard
-    connection-error handlers catch it (#20)."""
+    connection-error handlers catch it."""
     from bleak import BleakError
 
     from custom_components.asf02.managed_client import ManagedClientError
@@ -197,7 +197,7 @@ def test_managed_client_error_is_a_bleak_error():
 
 async def test_feed_service_converts_managed_client_error(hass, entry, patched_client, monkeypatch):
     """A ManagedClientError from the radio surfaces as a friendly
-    HomeAssistantError, not a raw traceback (#20)."""
+    HomeAssistantError, not a raw traceback."""
     from custom_components.asf02.managed_client import ManagedClientError
 
     await _ready(hass, entry, patched_client)

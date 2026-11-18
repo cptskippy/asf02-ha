@@ -151,7 +151,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         # Number of feeds in flight (or queued behind the session lock) — a
         # counter, not a bool, so overlapping async_feed calls can't clear it
         # early: the first feed's finally runs while the second is still
-        # pending, which would let the poll guard / refresh check misfire (#25).
+        # pending, which would let the poll guard / refresh check misfire.
         self._feed_in_progress = 0
         self._last_ad_log_at: float | None = None
         # Local schedule model (Option A): the device's schedule read is
@@ -269,7 +269,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         Converted with ``dt_util.as_local`` so it follows HA's configured
         timezone, matching the rest of the coordinator (``fetched_at``,
         ``last_feed_at``). The old ``.astimezone()`` used the host's local
-        timezone, which diverges from HA's whenever the two differ (#27).
+        timezone, which diverges from HA's whenever the two differ.
         """
         if not isinstance(unlock_result, dict):
             return None
@@ -396,7 +396,7 @@ class ASF02Coordinator(ActiveBluetoothDataUpdateCoordinator[FeederSnapshot]):
         """Replace the schedule (partial list; the client pads to 10 slots).
 
         Updates the local model from the device's confirmed array so the slot
-        entities reflect the new schedule now, not on the next poll (#21).
+        entities reflect the new schedule now, not on the next poll.
         """
         async with self._session_lock, self._session_client() as client:
             await client.unlock()
